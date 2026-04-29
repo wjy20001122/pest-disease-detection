@@ -56,6 +56,11 @@
             </button>
             <span v-if="location.address" class="address">{{ location.address }}</span>
           </div>
+          <div v-if="environment.weather || environment.temperature !== null || environment.humidity !== null" class="environment-card">
+            <span v-if="environment.weather">{{ environment.weather }}</span>
+            <span v-if="environment.temperature !== null">{{ environment.temperature }}℃</span>
+            <span v-if="environment.humidity !== null">湿度 {{ environment.humidity }}%</span>
+          </div>
         </div>
 
         <button class="detect-btn" @click="startImageDetect" :disabled="!file || loading">
@@ -335,7 +340,7 @@
 <script setup>
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { ElMessage } from 'element-plus'
-import { mlApi, detectionApi } from '@/api'
+import { mlApi, detectionApi, environmentApi } from '@/api'
 
 const tab = ref('image')
 const file = ref(null)
@@ -345,6 +350,7 @@ const fileInput = ref(null)
 const loading = ref(false)
 const result = ref(null)
 const location = ref({ lat: null, lng: null, address: '' })
+const environment = ref({ weather: '', temperature: null, humidity: null })
 const models = ref([])
 const selectedModel = ref('pest')
 
@@ -428,10 +434,30 @@ function getLocation() {
       location.value.lat = pos.coords.latitude
       location.value.lng = pos.coords.longitude
       location.value.address = '已获取位置'
+      await fetchEnvironment()
       ElMessage.success('位置已获取')
     },
     () => ElMessage.error('获取位置失败')
   )
+}
+
+async function fetchEnvironment() {
+  if (!location.value.lat || !location.value.lng) return
+  try {
+    const res = await environmentApi.current({
+      latitude: location.value.lat,
+      longitude: location.value.lng
+    })
+    location.value.address = res.address || `${location.value.lat.toFixed(5)},${location.value.lng.toFixed(5)}`
+    environment.value = {
+      weather: res.weather || '',
+      temperature: res.temperature ?? null,
+      humidity: res.humidity ?? null
+    }
+  } catch (e) {
+    location.value.address = `${location.value.lat.toFixed(5)},${location.value.lng.toFixed(5)}`
+    environment.value = { weather: '', temperature: null, humidity: null }
+  }
 }
 
 async function startImageDetect() {
@@ -440,11 +466,16 @@ async function startImageDetect() {
   try {
     const formData = new FormData()
     formData.append('file', file.value)
+    const params = {}
     if (location.value.lat) {
-      formData.append('latitude', location.value.lat.toString())
-      formData.append('longitude', location.value.lng.toString())
+      params.latitude = location.value.lat
+      params.longitude = location.value.lng
+      params.address = location.value.address || ''
+      params.weather = environment.value.weather || ''
+      if (environment.value.temperature !== null) params.temperature = environment.value.temperature
+      if (environment.value.humidity !== null) params.humidity = environment.value.humidity
     }
-    result.value = await detectionApi.image(formData)
+    result.value = await detectionApi.image(formData, params)
   } catch (e) {
     console.error(e)
     ElMessage.error('检测失败，请重试')
@@ -666,6 +697,7 @@ function reset() {
   videoStats.value = null
   stopCameraResources()
   cameraResult.value = null
+  environment.value = { weather: '', temperature: null, humidity: null }
 }
 
 onUnmounted(async () => {
@@ -781,6 +813,9 @@ onUnmounted(async () => {
 .location-section { margin-top: 20px; .section-label { font-size: 14px; color: var(--text-secondary); margin-bottom: 12px; } }
 .location-btns { display: flex; align-items: center; gap: 12px; }
 .address { font-size: 13px; color: var(--text-secondary); }
+.environment-card { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 10px; font-size: 13px; color: var(--text-secondary);
+  span { padding: 4px 8px; border-radius: var(--radius-sm); background: var(--bg-secondary); }
+}
 .detect-btn { width: 100%; margin-top: 20px; padding: 14px; background: var(--primary); color: white; border: none; border-radius: var(--radius-md); font-size: 16px; font-weight: 500; cursor: pointer; &:disabled { opacity: 0.6; cursor: not-allowed; } &:hover:not(:disabled) { background: var(--primary-dark); } }
 .result-card { background: var(--bg-primary); border-radius: var(--radius-lg); border: 1px solid var(--border-light); padding: 24px; }
 .result-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; }

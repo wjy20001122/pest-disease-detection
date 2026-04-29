@@ -58,3 +58,22 @@ Agent 在任务执行过程中发现的条目应遵循以下格式：
 - Category: 环境配置
 - Instructions:
   - 当前前端通过 `/api` 反向代理访问后端，若新增 WebSocket 接口，`frontend/vite.config.js` 的 `/api` 代理需要开启 `ws: true`。
+
+[跟踪与统计后端验证约束]
+- Date: 2026-04-30
+- Context: Agent 在执行 T08-1 与 T09-1 时发现
+- Category: 测试方法
+- Instructions:
+  - 当前实际挂载的 FastAPI 应用使用 `backend/app/db/*` 同步模型栈，新增落库接口应优先沿用该栈。
+  - `backend/scripts` 原本不存在，本次新增回归脚本时需在脚本内补 `sys.path`，从 `backend` 根目录导入 `app`。
+  - 跟踪接口需要兼容前端现有调用：创建/状态更新使用 JSON，跟踪更新使用 `multipart/form-data`。
+  - `passlib==1.7.4` 与 `bcrypt 5.x` 存在兼容风险，后端依赖需固定 `bcrypt>=4.0.1,<4.1.0`。
+
+[本机完整验收约束]
+- Date: 2026-04-30
+- Context: Agent 在执行本机预览和完整验收时发现
+- Category: 测试方法
+- Instructions:
+  - 本机验收使用 `/tmp/pdds-venv` 运行后端脚本，前端使用 `frontend/node_modules` 和 Vite。
+  - 图片检测页会先通过 `/environment/current` 获取环境数据，再以 query 参数随 `/detection/image` 上传提交。
+  - 通知模块已改为 `notifications` 表落库，Socket.IO 鉴权支持前端传入的 JWT token。

@@ -2,15 +2,16 @@ import uuid
 import json
 import asyncio
 import base64
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Optional, List, Dict, Any
 from fastapi import APIRouter, Depends, UploadFile, File, Query, HTTPException, WebSocket, WebSocketDisconnect
-from sqlalchemy import select, desc
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import func, select, desc
+from sqlalchemy.orm import Session
 
 from app.db.session import get_db
-from app.db.models import User, ImgRecord, VideoRecord, CameraRecord, Notification
+from app.db.models import User, ImgRecord, VideoRecord, CameraRecord
 from app.api.deps import get_current_user, get_current_user_from_header_or_query, decode_token
+from app.api.routers.notifications import create_notification
 from app.services.oss_service import oss_service
 from app.services.detection_router import detection_router, DetectionSource
 from app.services.review_agent import review_agent
@@ -22,24 +23,30 @@ camera_ws_sessions: Dict[str, Dict[str, Any]] = {}
 MAX_CAMERA_WS_FRAME_BYTES = 5 * 1024 * 1024
 
 
-async def trigger_review_task(detection_result: Dict, user_id: int, record_id: int, db: AsyncSession):
+async def trigger_review_task(detection_result: Dict, user_id: int, record_id: int):
     """后台任务：触发智能体审查"""
     try:
         review_result = await review_agent.review(detection_result)
 
         if review_result and review_result.get("status") == "warning":
             warning = review_result.get("warning", {})
-
-            notification = Notification(
+            create_notification(
                 user_id=user_id,
                 type="warning",
                 title=warning.get("title", "病虫害预警"),
                 content=warning.get("content", ""),
-                is_read=False,
-                related_detection_id=record_id
+                related_detection_id=record_id,
             )
-            db.add(notification)
-            await db.commit()
+
+            regional_alert = review_result.get("regional_alert")
+            if regional_alert:
+                create_notification(
+                    user_id=user_id,
+                    type="regional_alert",
+                    title=regional_alert.get("title", "区域病虫害预警"),
+                    content=regional_alert.get("content", ""),
+                    related_detection_id=record_id,
+                )
     except Exception:
         pass
 
@@ -55,7 +62,7 @@ async def detect_image(
     humidity: float = Query(None),
     weather: str = Query(""),
     current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db)
+    db: Session = Depends(get_db)
 ):
     if not file.filename:
         raise HTTPException(status_code=400, detail="未上传文件")
@@ -99,8 +106,8 @@ async def detect_image(
         conf="0.5"
     )
     db.add(record)
-    await db.commit()
-    await db.refresh(record)
+    db.commit()
+    db.refresh(record)
 
     response_data = {
         "id": record.id,
@@ -116,15 +123,24 @@ async def detect_image(
         "confidences": confidences if has_pest else [],
         "message": message
     }
+    environment_data = {
+        "latitude": latitude,
+        "longitude": longitude,
+        "address": address,
+        "temperature": temperature,
+        "humidity": humidity,
+        "weather": weather,
+    }
 
     if has_pest:
-        should_review = await detection_router.should_trigger_review(route_result)
+        review_payload = {**route_result, "environment": environment_data, "record_id": record.id}
+        should_review = await detection_router.should_trigger_review(review_payload)
         if should_review:
             response_data["needs_review"] = True
             response_data["review_triggered"] = True
 
             asyncio.create_task(
-                trigger_review_task(route_result, current_user.id, record.id, db)
+                trigger_review_task(review_payload, current_user.id, record.id)
             )
 
     return response_data
@@ -136,7 +152,7 @@ async def detect_video(
     model_key: str = Query("pest"),
     crop_type: str = Query(""),
     current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db)
+    db: Session = Depends(get_db)
 ):
     if not file.filename:
         raise HTTPException(status_code=400, detail="未上传文件")
@@ -160,8 +176,8 @@ async def detect_video(
         trackStats="{}"
     )
     db.add(record)
-    await db.commit()
-    await db.refresh(record)
+    db.commit()
+    db.refresh(record)
 
     return {
         "id": record.id,
@@ -367,12 +383,12 @@ async def get_history(
     page_size: int = Query(20, ge=1, le=100),
     detection_type: str = Query(None),
     current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db)
+    db: Session = Depends(get_db)
 ):
     offset = (page - 1) * page_size
 
     if detection_type == "image":
-        result = await db.execute(
+        result = db.execute(
             select(ImgRecord)
             .where(ImgRecord.username == current_user.username)
             .order_by(desc(ImgRecord.id))
@@ -380,11 +396,7 @@ async def get_history(
             .limit(page_size)
         )
         items = result.scalars().all()
-        total = await db.execute(
-            select(ImgRecord)
-            .where(ImgRecord.username == current_user.username)
-        )
-        total = len(total.scalars().all())
+        total = db.scalar(select(func.count()).select_from(ImgRecord).where(ImgRecord.username == current_user.username)) or 0
         records = [
             {
                 "id": item.id,
@@ -399,7 +411,7 @@ async def get_history(
             for item in items
         ]
     elif detection_type == "video":
-        result = await db.execute(
+        result = db.execute(
             select(VideoRecord)
             .where(VideoRecord.username == current_user.username)
             .order_by(desc(VideoRecord.id))
@@ -407,11 +419,7 @@ async def get_history(
             .limit(page_size)
         )
         items = result.scalars().all()
-        total = await db.execute(
-            select(VideoRecord)
-            .where(VideoRecord.username == current_user.username)
-        )
-        total = len(total.scalars().all())
+        total = db.scalar(select(func.count()).select_from(VideoRecord).where(VideoRecord.username == current_user.username)) or 0
         records = [
             {
                 "id": item.id,
@@ -424,7 +432,7 @@ async def get_history(
             for item in items
         ]
     elif detection_type == "camera":
-        result = await db.execute(
+        result = db.execute(
             select(CameraRecord)
             .where(CameraRecord.username == current_user.username)
             .order_by(desc(CameraRecord.id))
@@ -432,11 +440,7 @@ async def get_history(
             .limit(page_size)
         )
         items = result.scalars().all()
-        total = await db.execute(
-            select(CameraRecord)
-            .where(CameraRecord.username == current_user.username)
-        )
-        total = len(total.scalars().all())
+        total = db.scalar(select(func.count()).select_from(CameraRecord).where(CameraRecord.username == current_user.username)) or 0
         records = [
             {
                 "id": item.id,
@@ -449,21 +453,21 @@ async def get_history(
             for item in items
         ]
     else:
-        img_result = await db.execute(
+        img_result = db.execute(
             select(ImgRecord)
             .where(ImgRecord.username == current_user.username)
             .order_by(desc(ImgRecord.id))
             .offset(offset)
             .limit(page_size)
         )
-        video_result = await db.execute(
+        video_result = db.execute(
             select(VideoRecord)
             .where(VideoRecord.username == current_user.username)
             .order_by(desc(VideoRecord.id))
             .offset(offset)
             .limit(page_size)
         )
-        camera_result = await db.execute(
+        camera_result = db.execute(
             select(CameraRecord)
             .where(CameraRecord.username == current_user.username)
             .order_by(desc(CameraRecord.id))
@@ -499,9 +503,11 @@ async def get_history(
                 "created_at": item.startTime
             })
 
-        total = (len(img_result.scalars().all()) +
-                 len(video_result.scalars().all()) +
-                 len(camera_result.scalars().all()))
+        total = (
+            (db.scalar(select(func.count()).select_from(ImgRecord).where(ImgRecord.username == current_user.username)) or 0)
+            + (db.scalar(select(func.count()).select_from(VideoRecord).where(VideoRecord.username == current_user.username)) or 0)
+            + (db.scalar(select(func.count()).select_from(CameraRecord).where(CameraRecord.username == current_user.username)) or 0)
+        )
 
     records.sort(key=lambda x: x.get("created_at", ""), reverse=True)
 
@@ -513,15 +519,134 @@ async def get_history(
     }
 
 
+def _parse_stats_window(period: str, start_date: str | None, end_date: str | None) -> tuple[datetime, datetime]:
+    now = datetime.now()
+    if period == "day":
+        start = now - timedelta(days=7)
+    elif period == "week":
+        start = now - timedelta(weeks=4)
+    else:
+        start = now - timedelta(days=90)
+
+    if start_date:
+        start = datetime.strptime(start_date, "%Y-%m-%d")
+    if end_date:
+        end = datetime.strptime(end_date, "%Y-%m-%d").replace(hour=23, minute=59, second=59)
+    else:
+        end = now
+    return start, end
+
+
+def _record_in_window(start_time: str | None, start: datetime, end: datetime) -> bool:
+    if not start_time:
+        return False
+    try:
+        value = datetime.strptime(start_time[:19], "%Y-%m-%d %H:%M:%S")
+    except ValueError:
+        try:
+            value = datetime.strptime(start_time[:10], "%Y-%m-%d")
+        except ValueError:
+            return False
+    return start <= value <= end
+
+
+def _empty_day_stats(date_key: str, daily_stats: dict[str, dict]) -> dict:
+    if date_key not in daily_stats:
+        daily_stats[date_key] = {"count": 0, "pests": {}}
+    return daily_stats[date_key]
+
+
+def _build_detection_stats(
+    period: str = Query("month", description="统计周期：day/week/month"),
+    start_date: str = Query(None, description="开始日期 YYYY-MM-DD"),
+    end_date: str = Query(None, description="结束日期 YYYY-MM-DD"),
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    start, end = _parse_stats_window(period, start_date, end_date)
+    img_result = db.execute(select(ImgRecord).where(ImgRecord.username == current_user.username))
+    video_result = db.execute(select(VideoRecord).where(VideoRecord.username == current_user.username))
+    camera_result = db.execute(select(CameraRecord).where(CameraRecord.username == current_user.username))
+
+    img_records = img_result.scalars().all()
+    video_records = video_result.scalars().all()
+    camera_records = camera_result.scalars().all()
+
+    pest_distribution = {}
+    daily_stats = {}
+    confidence_stats = []
+
+    for record in img_records:
+        if not _record_in_window(record.startTime, start, end):
+            continue
+
+        date_key = record.startTime[:10] if record.startTime else "unknown"
+        day_stats = _empty_day_stats(date_key, daily_stats)
+        day_stats["count"] += 1
+
+        labels_json = record.label or "[]"
+        confidences_json = record.confidence or "[]"
+
+        try:
+            labels = json.loads(labels_json)
+            confidences = json.loads(confidences_json)
+
+            for label in labels:
+                pest_distribution[label] = pest_distribution.get(label, 0) + 1
+                day_stats["pests"][label] = day_stats["pests"].get(label, 0) + 1
+
+            confidence_stats.extend([float(c) for c in confidences if c])
+
+        except (json.JSONDecodeError, ValueError, TypeError):
+            continue
+
+    for record in [*video_records, *camera_records]:
+        if not _record_in_window(record.startTime, start, end):
+            continue
+        date_key = record.startTime[:10] if record.startTime else "unknown"
+        _empty_day_stats(date_key, daily_stats)["count"] += 1
+
+    avg_confidence = sum(confidence_stats) / len(confidence_stats) if confidence_stats else 0
+
+    trend_data = [
+        {"date": date, "count": stats["count"], "pests": stats["pests"]}
+        for date, stats in sorted(daily_stats.items())
+    ]
+
+    return {
+        "total": sum(stats["count"] for stats in daily_stats.values()),
+        "period": period,
+        "start_date": start.strftime("%Y-%m-%d"),
+        "end_date": end.strftime("%Y-%m-%d"),
+        "pest_distribution": [
+            {"name": name, "count": count}
+            for name, count in sorted(pest_distribution.items(), key=lambda x: x[1], reverse=True)
+        ],
+        "trend_data": trend_data,
+        "avg_confidence": round(avg_confidence, 2),
+        "high_confidence_count": len([c for c in confidence_stats if c >= 0.8])
+    }
+
+
+@router.get("/stats")
+async def get_stats(data: dict = Depends(_build_detection_stats)):
+    return data
+
+
+@router.get("/stats/overview")
+async def get_stats_overview(data: dict = Depends(_build_detection_stats)):
+    return data
+
+
 @router.get("/{record_id}")
 async def get_detail(
     record_id: int,
     detection_type: str = Query(...),
     current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db)
+    db: Session = Depends(get_db)
 ):
     if detection_type == "image":
-        result = await db.execute(
+        result = db.execute(
             select(ImgRecord).where(
                 ImgRecord.id == record_id,
                 ImgRecord.username == current_user.username
@@ -541,7 +666,7 @@ async def get_detail(
             "created_at": item.startTime
         }
     elif detection_type == "video":
-        result = await db.execute(
+        result = db.execute(
             select(VideoRecord).where(
                 VideoRecord.id == record_id,
                 VideoRecord.username == current_user.username
@@ -559,7 +684,7 @@ async def get_detail(
             "created_at": item.startTime
         }
     elif detection_type == "camera":
-        result = await db.execute(
+        result = db.execute(
             select(CameraRecord).where(
                 CameraRecord.id == record_id,
                 CameraRecord.username == current_user.username
@@ -580,95 +705,6 @@ async def get_detail(
         raise HTTPException(status_code=400, detail="无效的检测类型")
 
 
-@router.get("/stats/overview")
-async def get_stats(
-    period: str = Query("month", description="统计周期：day/week/month"),
-    start_date: str = Query(None, description="开始日期 YYYY-MM-DD"),
-    end_date: str = Query(None, description="结束日期 YYYY-MM-DD"),
-    current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db)
-):
-    from datetime import datetime, timedelta
-    from sqlalchemy import func, and_
-
-    now = datetime.now()
-    if period == "day":
-        start = now - timedelta(days=7)
-    elif period == "week":
-        start = now - timedelta(weeks=4)
-    else:
-        start = now - timedelta(days=90)
-
-    if start_date:
-        start = datetime.strptime(start_date, "%Y-%m-%d")
-    if end_date:
-        end = datetime.strptime(end_date, "%Y-%m-%d")
-    else:
-        end = now
-
-    img_result = await db.execute(
-        select(ImgRecord).where(
-            and_(
-                ImgRecord.username == current_user.username,
-                ImgRecord.startTime >= start.strftime("%Y-%m-%d"),
-                ImgRecord.startTime <= end.strftime("%Y-%m-%d")
-            )
-        )
-    )
-    img_records = img_result.scalars().all()
-
-    pest_distribution = {}
-    daily_stats = {}
-    confidence_stats = []
-
-    for record in img_records:
-        labels_json = record.label or "[]"
-        confidences_json = record.confidence or "[]"
-
-        try:
-            import json
-            labels = json.loads(labels_json)
-            confidences = json.loads(confidences_json)
-
-            date_key = record.startTime[:10] if record.startTime else "unknown"
-            if date_key not in daily_stats:
-                daily_stats[date_key] = {"count": 0, "pests": {}}
-
-            daily_stats[date_key]["count"] += 1
-
-            for label in labels:
-                pest_distribution[label] = pest_distribution.get(label, 0) + 1
-                if label not in daily_stats[date_key]["pests"]:
-                    daily_stats[date_key]["pests"][label] = 0
-                daily_stats[date_key]["pests"][label] += 1
-
-            confidence_stats.extend([float(c) for c in confidences if c])
-
-        except (json.JSONDecodeError, ValueError, TypeError):
-            continue
-
-    avg_confidence = sum(confidence_stats) / len(confidence_stats) if confidence_stats else 0
-
-    trend_data = [
-        {"date": date, "count": stats["count"], "pests": stats["pests"]}
-        for date, stats in sorted(daily_stats.items())
-    ]
-
-    return {
-        "total": len(img_records),
-        "period": period,
-        "start_date": start.strftime("%Y-%m-%d"),
-        "end_date": end.strftime("%Y-%m-%d"),
-        "pest_distribution": [
-            {"name": name, "count": count}
-            for name, count in sorted(pest_distribution.items(), key=lambda x: x[1], reverse=True)
-        ],
-        "trend_data": trend_data,
-        "avg_confidence": round(avg_confidence, 2),
-        "high_confidence_count": len([c for c in confidence_stats if c >= 0.8])
-    }
-
-
 @router.get("/export")
 async def export_records(
     format: str = Query("json", description="导出格式：json 或 csv"),
@@ -676,7 +712,7 @@ async def export_records(
     start_date: str = Query(None, description="开始日期 YYYY-MM-DD"),
     end_date: str = Query(None, description="结束日期 YYYY-MM-DD"),
     current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db)
+    db: Session = Depends(get_db)
 ):
     """导出用户检测记录"""
     from app.services.export_service import export_service

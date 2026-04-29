@@ -3,8 +3,8 @@ import hashlib
 from datetime import datetime, timedelta
 from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, desc
+from sqlalchemy.orm import Session
 
 from app.db.session import get_db
 from app.db.models import User, ApiKey
@@ -34,7 +34,7 @@ async def create_api_key(
     rate_limit: int = 60,
     expires_days: Optional[int] = None,
     current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db)
+    db: Session = Depends(get_db)
 ):
     """创建新的 API 密钥"""
     key = generate_api_key()
@@ -45,15 +45,18 @@ async def create_api_key(
         expires_at = datetime.utcnow() + timedelta(days=expires_days)
 
     api_key = ApiKey(
-        user_id=str(current_user.id),
+        user_id=current_user.id,
         key_hash=key_hash,
         name=name,
         rate_limit=rate_limit,
-        expires_at=expires_at
+        expires_at=expires_at,
+        is_active=1,
+        created_at=datetime.utcnow(),
     )
 
     db.add(api_key)
-    await db.commit()
+    db.commit()
+    db.refresh(api_key)
 
     return {
         "id": api_key.id,
@@ -68,14 +71,14 @@ async def create_api_key(
 @router.get("")
 async def list_api_keys(
     current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db)
+    db: Session = Depends(get_db)
 ):
     """获取用户的 API 密钥列表"""
     query = select(ApiKey).where(
-        ApiKey.user_id == str(current_user.id)
+        ApiKey.user_id == current_user.id
     ).order_by(desc(ApiKey.created_at))
 
-    result = await db.execute(query)
+    result = db.execute(query)
     keys = result.scalars().all()
 
     return {
@@ -97,13 +100,13 @@ async def list_api_keys(
 async def delete_api_key(
     key_id: str,
     current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db)
+    db: Session = Depends(get_db)
 ):
     """删除 API 密钥"""
-    result = await db.execute(
+    result = db.execute(
         select(ApiKey).where(
             ApiKey.id == key_id,
-            ApiKey.user_id == str(current_user.id)
+            ApiKey.user_id == current_user.id
         )
     )
     api_key = result.scalar_one_or_none()
@@ -114,8 +117,8 @@ async def delete_api_key(
             detail="API密钥不存在"
         )
 
-    await db.delete(api_key)
-    await db.commit()
+    db.delete(api_key)
+    db.commit()
 
     return {"message": "API密钥已删除"}
 
@@ -124,13 +127,13 @@ async def delete_api_key(
 async def toggle_api_key(
     key_id: str,
     current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db)
+    db: Session = Depends(get_db)
 ):
     """启用/禁用 API 密钥"""
-    result = await db.execute(
+    result = db.execute(
         select(ApiKey).where(
             ApiKey.id == key_id,
-            ApiKey.user_id == str(current_user.id)
+            ApiKey.user_id == current_user.id
         )
     )
     api_key = result.scalar_one_or_none()
@@ -142,6 +145,6 @@ async def toggle_api_key(
         )
 
     api_key.is_active = not api_key.is_active
-    await db.commit()
+    db.commit()
 
     return {"message": f"API密钥已{'启用' if api_key.is_active else '禁用'}"}

@@ -14,25 +14,29 @@
           "id": "T01-1",
           "title": "后端项目初始化",
           "detail": "初始化FastAPI项目，配置目录结构(app/api, app/services, app/models, app/core)，配置SQLAlchemy异步引擎、Alembic迁移、Pydantic配置",
-          "estimated_hours": 4
+          "estimated_hours": 4,
+          "status": "completed"
         },
         {
           "id": "T01-2",
           "title": "前端项目初始化",
           "detail": "使用Vite+Vue3+TypeScript创建项目，安装Element Plus、ECharts、Vue Router、Pinia、Axios，配置目录结构(src/views, src/components, src/api, src/stores)",
-          "estimated_hours": 4
+          "estimated_hours": 4,
+          "status": "completed"
         },
         {
           "id": "T01-3",
           "title": "宝塔+GitHub部署配置",
           "detail": "配置宝塔面板+Nginx+PM2部署方案；GitHub Actions CI/CD工作流自动部署；Nginx反向代理配置；MySQL+阿里云OSS存储",
-          "estimated_hours": 3
+          "estimated_hours": 3,
+          "status": "completed"
         },
         {
           "id": "T01-4",
           "title": "数据库表设计与迁移",
           "detail": "使用SQLAlchemy定义所有表模型(users, detections, tracking_tasks, tracking_updates, model_registry, notifications, knowledge_base, video_frames, api_keys, operation_logs)；MySQL数据库迁移脚本；阿里云OSS文件存储服务",
-          "estimated_hours": 6
+          "estimated_hours": 6,
+          "status": "completed"
         }
       ]
     },
@@ -183,21 +187,21 @@
       "description": "实现检测时自动采集天气、地址、温度等环境数据",
       "priority": "medium",
       "dependencies": ["T01"],
-      "status": "in_progress",
+      "status": "completed",
       "subtasks": [
         {
           "id": "T07-1",
           "title": "后端环境数据服务",
           "detail": "集成地图API逆地理编码(高德/百度)；集成天气API获取实时天气(和风天气)；EnvironmentService并行获取地址和天气；手动补充环境数据接口；接口异常处理与降级",
           "estimated_hours": 5,
-          "status": "in_progress"
+          "status": "completed"
         },
         {
           "id": "T07-2",
           "title": "前端环境数据集成",
           "detail": "检测页面集成浏览器Geolocation API；环境数据展示卡片；手动输入地址降级方案",
           "estimated_hours": 3,
-          "status": "in_progress"
+          "status": "completed"
         }
       ]
     },
@@ -207,21 +211,21 @@
       "description": "实现虫害检测后的持续跟踪和状态管理",
       "priority": "medium",
       "dependencies": ["T04"],
-      "status": "in_progress",
+      "status": "completed",
       "subtasks": [
         {
           "id": "T08-1",
           "title": "后端跟踪服务",
           "detail": "实现tracking_tasks和tracking_updates的CRUD；创建跟踪任务(关联检测记录和地理位置)；更新跟踪记录；解决/归档跟踪任务；活跃任务数量限制(100条)",
           "estimated_hours": 5,
-          "status": "in_progress"
+          "status": "completed"
         },
         {
           "id": "T08-2",
           "title": "前端跟踪页面",
           "detail": "地图页面(Leaflet)标注虫害位置和状态；跟踪任务列表(筛选/排序)；跟踪详情页(时间线+图片+状态变更)；从检测记录发起跟踪",
           "estimated_hours": 7,
-          "status": "in_progress"
+          "status": "completed"
         }
       ]
     },
@@ -231,14 +235,14 @@
       "description": "实现病虫害检测数据的可视化统计展示",
       "priority": "medium",
       "dependencies": ["T04"],
-      "status": "in_progress",
+      "status": "completed",
       "subtasks": [
         {
           "id": "T09-1",
           "title": "后端统计API",
           "detail": "实现GET /detection/stats接口；检测次数趋势统计(按日/周/月)；病虫害类型分布统计；地区分布统计；时间范围筛选；Redis缓存热点统计数据",
           "estimated_hours": 5,
-          "status": "in_progress"
+          "status": "completed"
         },
         {
           "id": "T09-2",
@@ -295,21 +299,21 @@
       "description": "实现检测结果自动审查、风险评估、警告生成和推送",
       "priority": "high",
       "dependencies": ["T04", "T10"],
-      "status": "in_progress",
+      "status": "completed",
       "subtasks": [
         {
           "id": "T12-1",
           "title": "后端审查智能体",
           "detail": "实现ReviewAgent：审查触发条件判断(置信度>80%或severity=high) -> 构建审查上下文(检测结果+环境数据+地区历史+知识库) -> LLM风险评估 -> 误报判断 -> 警告信息生成 -> 区域预警检测(同地区3天内>=3例) -> 推送通知",
           "estimated_hours": 10,
-          "status": "in_progress"
+          "status": "completed"
         },
         {
           "id": "T12-2",
           "title": "后端通知推送服务",
           "detail": "实现NotificationService：站内WebSocket实时推送；Web Push通知(Service Worker)；通知数据库存储；区域批量推送；未读计数管理",
           "estimated_hours": 6,
-          "status": "in_progress"
+          "status": "completed"
         },
         {
           "id": "T12-3",
@@ -550,7 +554,7 @@
     },
     {
       "name": "Phase 4 - 管理与扩展",
-      "tasks": ["T13", "T14", "T15", "T16", "T17", "T18"],
+      "tasks": ["T13", "T14", "T16", "T17", "T18"],
       "goal": "完成管理后台、历史记录、国际化、安全、导入导出、API集成"
     },
     {

@@ -9,10 +9,10 @@
       
       <el-form ref="formRef" :model="form" :rules="rules" @submit.prevent="handleLogin">
         <el-form-item prop="username">
-          <el-input v-model="form.username" placeholder="用户名" size="large" :prefix-icon="User" />
+          <el-input v-model="form.username" placeholder="用户名" size="large" :prefix-icon="User" :validate-event="false" />
         </el-form-item>
         <el-form-item prop="password">
-          <el-input v-model="form.password" type="password" placeholder="密码" size="large" :prefix-icon="Lock" show-password />
+          <el-input v-model="form.password" type="password" placeholder="密码" size="large" :prefix-icon="Lock" show-password :validate-event="false" />
         </el-form-item>
         <el-form-item>
           <el-button type="primary" size="large" :loading="loading" class="login-btn" @click="handleLogin">登录</el-button>

@@ -50,16 +50,24 @@ export default request
 
 // 认证相关 API
 export const authApi = {
-  register: (data) => request.post('/auth/register', data),
-  login: (data) => request.post('/auth/login', data),
+  register: (data) => request.post('/auth/register', null, { params: data }),
+  login: (data) => {
+    const form = new URLSearchParams()
+    form.append('username', data.username)
+    form.append('password', data.password)
+    return request.post('/auth/login', form, {
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' }
+    })
+  },
   logout: () => request.post('/auth/logout'),
   getProfile: () => request.get('/auth/profile'),
-  updateProfile: (data) => request.put('/auth/profile', data)
+  updateProfile: (data) => request.put('/auth/profile', null, { params: data })
 }
 
 // 检测相关 API (自定义病虫害检测)
 export const detectionApi = {
-  image: (formData) => request.post('/detection/image', formData, {
+  image: (formData, params = {}) => request.post('/detection/image', formData, {
+    params,
     headers: { 'Content-Type': 'multipart/form-data' }
   }),
   video: (formData) => request.post('/detection/video', formData, {
@@ -105,6 +113,13 @@ export const trackingApi = {
   detail: (id) => request.get(`/tracking/${id}`),
   update: (id, data) => request.put(`/tracking/${id}`, data),
   addUpdate: (id, data) => request.post(`/tracking/${id}/updates`, data)
+}
+
+// 环境数据 API
+export const environmentApi = {
+  current: (params) => request.get('/environment/current', { params }),
+  weather: (params) => request.get('/environment/weather', { params }),
+  manual: (params) => request.post('/environment/manual', null, { params })
 }
 
 // 知识库 API

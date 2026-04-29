@@ -11,6 +11,7 @@ FASTAPI_ROOT = Path(__file__).resolve().parents[2]
 REPO_ROOT = FASTAPI_ROOT.parent
 
 load_dotenv(REPO_ROOT / ".env")
+load_dotenv(FASTAPI_ROOT / ".env", override=True)
 
 
 @dataclass(frozen=True)

@@ -38,11 +38,13 @@ class ReviewAgent:
             }
 
         warning = await self.generate_warning(detection_result, risk_assessment)
+        regional_alert = await self.check_regional_alert(detection_result)
 
         return {
             "status": "warning",
             "warning": warning,
-            "risk_assessment": risk_assessment
+            "risk_assessment": risk_assessment,
+            "regional_alert": regional_alert
         }
 
     def should_review(self, detection_result: Dict[str, Any]) -> bool:
@@ -74,6 +76,10 @@ class ReviewAgent:
 
         if result.get("ai_analysis"):
             context["ai_analysis"] = result.get("ai_analysis")
+        if result.get("environment"):
+            context["environment"] = result.get("environment")
+        if result.get("regional_history"):
+            context["regional_history"] = result.get("regional_history")
 
         return context
 
@@ -84,8 +90,8 @@ class ReviewAgent:
         try:
             assessment = await self.deepseek.assess_risk(
                 detection_result=detection,
-                environment_data=None,
-                regional_history=None
+                environment_data=context.get("environment"),
+                regional_history=context.get("regional_history")
             )
             return assessment
         except Exception as e:
@@ -140,6 +146,43 @@ class ReviewAgent:
         检查是否需要区域预警
         同地区3天内检测到相同病虫害>=3例时触发
         """
+        diseases = detection_result.get("merged_result", {}).get("diseases", [])
+        disease_name = diseases[0].get("name", "未知病虫害") if diseases else "未知病虫害"
+        environment = detection_result.get("environment") or {}
+        address = environment.get("address") or "当前区域"
+
+        history = detection_result.get("regional_history") or []
+        matching_count = 1
+        cutoff = datetime.now() - timedelta(days=days)
+
+        for item in history:
+            try:
+                item_time = item.get("created_at")
+                if item_time:
+                    created_at = datetime.fromisoformat(str(item_time).replace("Z", "+00:00")).replace(tzinfo=None)
+                    if created_at < cutoff:
+                        continue
+            except ValueError:
+                continue
+
+            same_disease = item.get("disease_name") == disease_name or disease_name in str(item.get("diseases", ""))
+            same_region = not address or address == "当前区域" or address in str(item.get("address", ""))
+            if same_disease and same_region:
+                matching_count += 1
+
+        if matching_count < threshold:
+            return None
+
+        return {
+            "title": f"区域病虫害预警：{disease_name}",
+            "content": f"{address}近{days}天内已出现{matching_count}例{disease_name}相关检测，建议加强巡田、隔离病株并及时防治。",
+            "severity": "high",
+            "count": matching_count,
+            "days": days,
+            "disease_name": disease_name,
+            "address": address,
+        }
+
         return None
 
 

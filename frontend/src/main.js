@@ -16,7 +16,23 @@ app.use(ElementPlus, { locale: zhCn })
 
 app.mount('#app')
 
-if ('serviceWorker' in navigator) {
+const isLocalDevHost = ['localhost', '127.0.0.1'].includes(window.location.hostname)
+
+async function clearDevServiceWorkers() {
+  if (!('serviceWorker' in navigator)) return
+
+  const registrations = await navigator.serviceWorker.getRegistrations()
+  await Promise.all(registrations.map((registration) => registration.unregister()))
+
+  if ('caches' in window) {
+    const cacheNames = await caches.keys()
+    await Promise.all(cacheNames.map((cacheName) => caches.delete(cacheName)))
+  }
+
+  console.log('Development mode: cleared service workers and caches for localhost')
+}
+
+if (import.meta.env.PROD && 'serviceWorker' in navigator) {
   window.addEventListener('load', async () => {
     try {
       const registration = await navigator.serviceWorker.register('/sw.js')
@@ -28,6 +44,12 @@ if ('serviceWorker' in navigator) {
     } catch (err) {
       console.log('SW registration failed:', err)
     }
+  })
+} else if (isLocalDevHost) {
+  window.addEventListener('load', () => {
+    clearDevServiceWorkers().catch((err) => {
+      console.log('Failed to clear development service workers:', err)
+    })
   })
 }
 

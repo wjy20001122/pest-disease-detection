@@ -37,6 +37,7 @@ def create_fastapi_app() -> FastAPI:
     app.include_router(auth.router)
     app.include_router(detection.router)
     app.include_router(tracking.router)
+    app.include_router(tracking.router, prefix="/api/v1")
     app.include_router(knowledge.router)
     app.include_router(qna.router)
     app.include_router(notifications.router)
@@ -55,4 +56,3 @@ def create_fastapi_app() -> FastAPI:
 
 fastapi_app = create_fastapi_app()
 app = socket_manager.create_asgi_app(fastapi_app)
-

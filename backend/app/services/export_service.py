@@ -3,8 +3,8 @@ import json
 import io
 from datetime import datetime
 from typing import List, Dict, Any, Optional
-from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
+from sqlalchemy.orm import Session
 
 
 class ExportService:
@@ -56,7 +56,7 @@ class ExportService:
 
     async def export_detection_records(
         self,
-        db: AsyncSession,
+        db: Session,
         username: str,
         start_date: Optional[str] = None,
         end_date: Optional[str] = None,
@@ -74,7 +74,7 @@ class ExportService:
             if end_date:
                 query = query.where(ImgRecord.startTime <= end_date)
 
-            result = await db.execute(query)
+            result = db.execute(query)
             for item in result.scalars().all():
                 records.append({
                     "id": item.id,
@@ -95,7 +95,7 @@ class ExportService:
             if end_date:
                 query = query.where(VideoRecord.startTime <= end_date)
 
-            result = await db.execute(query)
+            result = db.execute(query)
             for item in result.scalars().all():
                 records.append({
                     "id": item.id,
@@ -114,7 +114,7 @@ class ExportService:
             if end_date:
                 query = query.where(CameraRecord.startTime <= end_date)
 
-            result = await db.execute(query)
+            result = db.execute(query)
             for item in result.scalars().all():
                 records.append({
                     "id": item.id,

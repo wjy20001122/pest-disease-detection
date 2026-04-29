@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from sqlalchemy import Column, DateTime, Integer, String, Text
+from sqlalchemy import Column, DateTime, Float, Integer, String, Text
 
 from app.db.session import Base
 
@@ -77,6 +77,35 @@ class DataCollectionRecord(Base):
     ossImageUrls = Column("oss_image_urls", Text)
 
 
+class TrackingTask(Base):
+    __tablename__ = "tracking_tasks"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(Integer, nullable=False, index=True)
+    detection_id = Column(Integer, nullable=True, index=True)
+    disease_name = Column(String(100), nullable=False)
+    severity = Column(String(20), default="medium", index=True)
+    status = Column(String(20), default="active", index=True)
+    latitude = Column(Float, nullable=True)
+    longitude = Column(Float, nullable=True)
+    location = Column(String(255), nullable=True)
+    notes = Column(Text, nullable=True)
+    resolved_at = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, nullable=False)
+    updated_at = Column(DateTime, nullable=False)
+
+
+class TrackingUpdate(Base):
+    __tablename__ = "tracking_updates"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    task_id = Column(Integer, nullable=False, index=True)
+    status = Column(String(20), nullable=True)
+    note = Column(Text, nullable=True)
+    image = Column(Text, nullable=True)
+    created_at = Column(DateTime, nullable=False)
+
+
 class Notification(Base):
     __tablename__ = "notifications"
 
@@ -151,4 +180,3 @@ DATA_COLLECTION_FIELDS = {
     "ossFolder",
     "ossImageUrls",
 }
-

@@ -15,7 +15,20 @@
 
     <!-- 地图区域 -->
     <div class="map-container card">
-      <div id="map" class="map"></div>
+      <div class="map">
+        <button
+          v-for="marker in mapMarkers"
+          :key="marker.id"
+          class="map-marker"
+          :class="marker.status"
+          :style="{ left: marker.x + '%', top: marker.y + '%' }"
+          :title="marker.disease_name"
+          @click.stop="viewDetail(marker.id)"
+        >
+          <span></span>
+        </button>
+        <div v-if="!mapMarkers.length" class="map-empty">暂无可定位的跟踪任务</div>
+      </div>
       <div class="map-legend">
         <span class="legend-item active">● 进行中</span>
         <span class="legend-item resolved">● 已解决</span>
@@ -72,7 +85,10 @@
           </el-select>
         </el-form-item>
         <el-form-item label="位置描述">
-          <el-input v-model="form.location" placeholder="如：田中部" />
+          <div class="location-input-row">
+            <el-input v-model="form.location" placeholder="如：田中部" />
+            <el-button @click="fillCurrentLocation">定位</el-button>
+          </div>
         </el-form-item>
         <el-form-item label="备注">
           <el-input v-model="form.notes" type="textarea" :rows="3" placeholder="补充说明" />
@@ -152,7 +168,7 @@
 </template>
 
 <script setup>
-import { ref, reactive, onMounted, watch } from 'vue'
+import { computed, ref, reactive, onMounted, watch } from 'vue'
 import { ElMessage } from 'element-plus'
 import { UploadFilled } from '@element-plus/icons-vue'
 import { trackingApi, detectionApi } from '@/api'
@@ -165,7 +181,15 @@ const showUpdateDialog = ref(false)
 const current = ref(null)
 const updates = ref([])
 const detections = ref([])
-const statusMap = { active: '进行中', resolved: '已解决', archived: '已归档' }
+const statusMap = {
+  active: '进行中',
+  monitoring: '监测中',
+  worsening: '恶化',
+  improving: '好转',
+  treated: '已处理',
+  resolved: '已解决',
+  archived: '已归档'
+}
 const severityMap = { high: '严重', medium: '中等', low: '轻微' }
 
 const form = reactive({
@@ -173,6 +197,8 @@ const form = reactive({
   disease_name: '',
   severity: 'medium',
   location: '',
+  latitude: null,
+  longitude: null,
   notes: ''
 })
 
@@ -180,6 +206,26 @@ const updateForm = reactive({
   status: 'monitoring',
   note: '',
   image: null
+})
+
+const mapMarkers = computed(() => {
+  const located = list.value.filter(item => item.latitude !== null && item.latitude !== undefined && item.longitude !== null && item.longitude !== undefined)
+  if (!located.length) return []
+
+  const lats = located.map(item => Number(item.latitude))
+  const lngs = located.map(item => Number(item.longitude))
+  const minLat = Math.min(...lats)
+  const maxLat = Math.max(...lats)
+  const minLng = Math.min(...lngs)
+  const maxLng = Math.max(...lngs)
+  const latSpan = Math.max(maxLat - minLat, 0.001)
+  const lngSpan = Math.max(maxLng - minLng, 0.001)
+
+  return located.map(item => ({
+    ...item,
+    x: 8 + ((Number(item.longitude) - minLng) / lngSpan) * 84,
+    y: 92 - ((Number(item.latitude) - minLat) / latSpan) * 84
+  }))
 })
 
 function formatTime(time) {
@@ -214,9 +260,27 @@ async function handleCreate() {
     await trackingApi.create(form)
     ElMessage.success('创建成功')
     showCreateDialog.value = false
-    Object.assign(form, { detection_id: null, disease_name: '', severity: 'medium', location: '', notes: '' })
+    Object.assign(form, { detection_id: null, disease_name: '', severity: 'medium', location: '', latitude: null, longitude: null, notes: '' })
     fetchList()
   } catch (e) { ElMessage.error('创建失败') }
+}
+
+function fillCurrentLocation() {
+  if (!navigator.geolocation) {
+    ElMessage.warning('浏览器不支持定位')
+    return
+  }
+  navigator.geolocation.getCurrentPosition(
+    (pos) => {
+      form.latitude = pos.coords.latitude
+      form.longitude = pos.coords.longitude
+      if (!form.location) {
+        form.location = `${form.latitude.toFixed(5)},${form.longitude.toFixed(5)}`
+      }
+      ElMessage.success('位置已填充')
+    },
+    () => ElMessage.error('定位失败')
+  )
 }
 
 async function viewDetail(id) {
@@ -284,7 +348,14 @@ onMounted(() => {
 .filter-group { display: flex; gap: 12px; }
 
 .map-container { padding: 0; overflow: hidden; margin-bottom: 24px; position: relative; }
-.map { height: 300px; background: #f0f9f4; display: flex; align-items: center; justify-content: center; color: var(--text-muted); }
+.map { height: 300px; background: linear-gradient(135deg, #ecfdf5, #eef2ff); position: relative; overflow: hidden; }
+.map::before { content: ''; position: absolute; inset: 24px; border: 1px solid rgba(15, 23, 42, 0.08); background-image: linear-gradient(rgba(15, 23, 42, 0.06) 1px, transparent 1px), linear-gradient(90deg, rgba(15, 23, 42, 0.06) 1px, transparent 1px); background-size: 40px 40px; border-radius: var(--radius-md); }
+.map-empty { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; color: var(--text-muted); }
+.map-marker { position: absolute; width: 24px; height: 24px; transform: translate(-50%, -50%); border: 0; background: transparent; cursor: pointer; z-index: 2; }
+.map-marker span { display: block; width: 14px; height: 14px; margin: 5px; border-radius: 50%; background: var(--primary); box-shadow: 0 0 0 4px rgba(34, 197, 94, 0.2); }
+.map-marker.resolved span { background: #6b7280; box-shadow: 0 0 0 4px rgba(107, 114, 128, 0.18); }
+.map-marker.archived span { background: #9ca3af; box-shadow: 0 0 0 4px rgba(156, 163, 175, 0.16); }
+.map-marker.worsening span { background: #dc2626; box-shadow: 0 0 0 4px rgba(220, 38, 38, 0.18); }
 .map-legend { position: absolute; bottom: 12px; right: 12px; background: white; padding: 8px 12px; border-radius: var(--radius-sm); box-shadow: 0 2px 8px rgba(0,0,0,0.1); }
 .legend-item { margin-right: 16px; font-size: 13px; &.active { color: var(--primary); } &.resolved { color: var(--text-muted); } }
 
@@ -292,7 +363,7 @@ onMounted(() => {
 .tracking-item { cursor: pointer; transition: box-shadow 0.2s; &:hover { box-shadow: var(--shadow-md); } }
 .item-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; }
 .disease-name { font-size: 16px; font-weight: 600; }
-.status-badge { padding: 4px 10px; border-radius: 12px; font-size: 12px; font-weight: 500; &.active { background: #d1fae5; color: #065f46; } &.resolved { background: #e5e7eb; color: #374151; } &.archived { background: #f3f4f6; color: #9ca3af; } }
+.status-badge { padding: 4px 10px; border-radius: 12px; font-size: 12px; font-weight: 500; &.active, &.monitoring, &.improving, &.treated { background: #d1fae5; color: #065f46; } &.worsening { background: #fee2e2; color: #991b1b; } &.resolved { background: #e5e7eb; color: #374151; } &.archived { background: #f3f4f6; color: #9ca3af; } }
 
 .item-body { margin-bottom: 16px; }
 .info-row { display: flex; justify-content: space-between; margin-bottom: 4px; font-size: 13px; color: var(--text-secondary); }
@@ -318,4 +389,5 @@ onMounted(() => {
 .update-image { max-width: 200px; margin-top: 8px; border-radius: var(--radius-sm); }
 
 .detail-actions { display: flex; gap: 12px; margin-top: 24px; }
+.location-input-row { display: flex; gap: 8px; width: 100%; }
 </style>

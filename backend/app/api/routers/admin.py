@@ -2,10 +2,10 @@ from datetime import datetime
 from typing import Optional
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy import select, func
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import Session
 
 from app.db.session import get_db
-from app.db.models import User, ImgRecord, VideoRecord, CameraRecord
+from app.db.models import User, ImgRecord, VideoRecord, CameraRecord, Notification
 from app.api.deps import get_admin_user
 
 router = APIRouter(prefix="/admin", tags=["管理后台"])
@@ -14,14 +14,14 @@ router = APIRouter(prefix="/admin", tags=["管理后台"])
 @router.get("/dashboard")
 async def get_dashboard(
     current_user: User = Depends(get_admin_user),
-    db: AsyncSession = Depends(get_db)
+    db: Session = Depends(get_db)
 ):
-    user_count = await db.execute(select(func.count(User.id)))
+    user_count = db.execute(select(func.count(User.id)))
     total_users = user_count.scalar() or 0
 
-    img_count = await db.execute(select(func.count(ImgRecord.id)))
-    video_count = await db.execute(select(func.count(VideoRecord.id)))
-    camera_count = await db.execute(select(func.count(CameraRecord.id)))
+    img_count = db.execute(select(func.count(ImgRecord.id)))
+    video_count = db.execute(select(func.count(VideoRecord.id)))
+    camera_count = db.execute(select(func.count(CameraRecord.id)))
     total_detections = (img_count.scalar() or 0) + (video_count.scalar() or 0) + (camera_count.scalar() or 0)
 
     return {
@@ -40,7 +40,7 @@ async def list_users(
     page_size: int = Query(20, ge=1, le=100),
     keyword: str = Query(None),
     current_user: User = Depends(get_admin_user),
-    db: AsyncSession = Depends(get_db)
+    db: Session = Depends(get_db)
 ):
     query = select(User)
 
@@ -48,10 +48,10 @@ async def list_users(
         query = query.where(User.username.like(f"%{keyword}%"))
 
     count_query = select(func.count()).select_from(query.subquery())
-    total = (await db.execute(count_query)).scalar() or 0
+    total = db.execute(count_query).scalar() or 0
 
     query = query.offset((page - 1) * page_size).limit(page_size)
-    result = await db.execute(query)
+    result = db.execute(query)
     users = result.scalars().all()
 
     items = []
@@ -79,11 +79,11 @@ async def get_stats(
     start_date: str = Query(None),
     end_date: str = Query(None),
     current_user: User = Depends(get_admin_user),
-    db: AsyncSession = Depends(get_db)
+    db: Session = Depends(get_db)
 ):
-    img_result = await db.execute(select(func.count(ImgRecord.id)))
-    video_result = await db.execute(select(func.count(VideoRecord.id)))
-    camera_result = await db.execute(select(func.count(CameraRecord.id)))
+    img_result = db.execute(select(func.count(ImgRecord.id)))
+    video_result = db.execute(select(func.count(VideoRecord.id)))
+    camera_result = db.execute(select(func.count(CameraRecord.id)))
 
     return {
         "total_detections": (img_result.scalar() or 0) + (video_result.scalar() or 0) + (camera_result.scalar() or 0),
@@ -131,15 +131,20 @@ async def list_models(
 async def list_all_notifications(
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
-    current_user: User = Depends(get_admin_user)
+    current_user: User = Depends(get_admin_user),
+    db: Session = Depends(get_db),
 ):
-    from app.api.routers.notifications import notifications_db
+    from app.api.routers.notifications import _notification_to_dict
 
-    items = notifications_db[(page - 1) * page_size:page * page_size]
+    query = select(Notification).order_by(Notification.created_at.desc(), Notification.id.desc())
+    total = db.scalar(select(func.count()).select_from(Notification)) or 0
+    items = db.execute(
+        query.offset((page - 1) * page_size).limit(page_size)
+    ).scalars().all()
 
     return {
-        "items": items,
-        "total": len(notifications_db),
+        "items": [_notification_to_dict(item) for item in items],
+        "total": total,
         "page": page,
         "page_size": page_size
     }

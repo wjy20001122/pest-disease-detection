@@ -1,5 +1,6 @@
 import httpx
 import asyncio
+from datetime import datetime
 from typing import Optional, Dict, Any
 from dataclasses import dataclass
 from app.core.config import settings
@@ -130,7 +131,7 @@ class EnvironmentService:
         """
         tasks = []
 
-        if latitude and longitude:
+        if latitude is not None and longitude is not None:
             tasks.append(self._get_address_from_coords(latitude, longitude))
             tasks.append(self._get_weather_from_coords(latitude, longitude))
         else:
@@ -167,7 +168,7 @@ class EnvironmentService:
             wind_speed=weather_data.get("wind_speed"),
             pressure=weather_data.get("pressure"),
             visibility=weather_data.get("visibility"),
-            recorded_at=weather_data.get("recorded_at", "")
+            recorded_at=weather_data.get("recorded_at") or datetime.now().isoformat()
         )
 
     async def _get_address_from_coords(self, latitude: float, longitude: float) -> str:

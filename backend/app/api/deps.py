@@ -5,7 +5,7 @@ from passlib.context import CryptContext
 from fastapi import Depends, HTTPException, Query, Security, status
 from fastapi.security import OAuth2PasswordBearer
 from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import Session
 
 from app.db.session import get_db
 from app.db.models import User
@@ -48,7 +48,7 @@ def decode_token(token: str) -> Optional[dict]:
 
 async def get_current_user(
     token: str = Depends(oauth2_scheme),
-    db: AsyncSession = Depends(get_db)
+    db: Session = Depends(get_db)
 ) -> User:
     credentials_exception = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
@@ -63,7 +63,7 @@ async def get_current_user(
     if user_id is None:
         raise credentials_exception
 
-    result = await db.execute(select(User).where(User.id == int(user_id)))
+    result = db.execute(select(User).where(User.id == int(user_id)))
     user = result.scalar_one_or_none()
 
     if user is None:
@@ -74,7 +74,7 @@ async def get_current_user(
 async def get_current_user_from_header_or_query(
     token: str | None = Security(oauth2_scheme_optional),
     query_token: str | None = Query(None, alias="token"),
-    db: AsyncSession = Depends(get_db),
+    db: Session = Depends(get_db),
 ) -> User:
     credentials_exception = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
@@ -94,7 +94,7 @@ async def get_current_user_from_header_or_query(
     if user_id is None:
         raise credentials_exception
 
-    result = await db.execute(select(User).where(User.id == int(user_id)))
+    result = db.execute(select(User).where(User.id == int(user_id)))
     user = result.scalar_one_or_none()
     if user is None:
         raise credentials_exception

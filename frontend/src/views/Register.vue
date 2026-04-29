@@ -8,13 +8,13 @@
       </div>
       <el-form ref="formRef" :model="form" :rules="rules" @submit.prevent="handleRegister">
         <el-form-item prop="username">
-          <el-input v-model="form.username" placeholder="用户名" size="large" :prefix-icon="User" />
+          <el-input v-model="form.username" placeholder="用户名" size="large" :prefix-icon="User" :validate-event="false" />
         </el-form-item>
         <el-form-item prop="email">
-          <el-input v-model="form.email" placeholder="邮箱" type="email" size="large" :prefix-icon="Message" />
+          <el-input v-model="form.email" placeholder="邮箱" type="email" size="large" :prefix-icon="Message" :validate-event="false" />
         </el-form-item>
         <el-form-item prop="password">
-          <el-input v-model="form.password" type="password" placeholder="密码（至少6位）" size="large" :prefix-icon="Lock" show-password />
+          <el-input v-model="form.password" type="password" placeholder="密码（至少6位）" size="large" :prefix-icon="Lock" show-password :validate-event="false" />
         </el-form-item>
         <el-form-item>
           <el-button type="primary" size="large" :loading="loading" class="register-btn" @click="handleRegister">注册</el-button>

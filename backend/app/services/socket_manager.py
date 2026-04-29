@@ -26,6 +26,15 @@ class SocketManager:
         async def connect(sid, environ, auth):  # type: ignore[no-redef]
             del environ
             user_id = auth.get("user_id") if auth else None
+            token = auth.get("token") if auth else None
+            if not user_id and token:
+                try:
+                    from app.api.deps import decode_token
+
+                    payload = decode_token(token)
+                    user_id = payload.get("sub") if payload else None
+                except Exception:
+                    user_id = None
             if user_id:
                 await self.sio.enter_room(sid, f"user_{user_id}")
             await self.sio.emit("message", {"data": "Connected to WebSocket server!"}, to=sid)
@@ -54,4 +63,3 @@ class SocketManager:
 
 
 socket_manager = SocketManager()
-

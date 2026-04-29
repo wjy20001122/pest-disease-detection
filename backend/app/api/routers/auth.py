@@ -2,7 +2,7 @@ from datetime import timedelta
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import Session
 
 from app.db.session import get_db
 from app.db.models import User
@@ -20,13 +20,13 @@ async def register(
     password: str,
     email: str,
     name: str = "",
-    db: AsyncSession = Depends(get_db)
+    db: Session = Depends(get_db)
 ):
-    result = await db.execute(select(User).where(User.username == username))
+    result = db.execute(select(User).where(User.username == username))
     if result.scalar_one_or_none():
         raise HTTPException(status_code=400, detail="用户名已存在")
 
-    result = await db.execute(select(User).where(User.email == email))
+    result = db.execute(select(User).where(User.email == email))
     if result.scalar_one_or_none():
         raise HTTPException(status_code=400, detail="邮箱已被注册")
 
@@ -38,8 +38,8 @@ async def register(
         role="user"
     )
     db.add(user)
-    await db.commit()
-    await db.refresh(user)
+    db.commit()
+    db.refresh(user)
 
     return {"id": user.id, "username": user.username, "email": user.email}
 
@@ -47,9 +47,9 @@ async def register(
 @router.post("/login")
 async def login(
     form_data: OAuth2PasswordRequestForm = Depends(),
-    db: AsyncSession = Depends(get_db)
+    db: Session = Depends(get_db)
 ):
-    result = await db.execute(select(User).where(User.username == form_data.username))
+    result = db.execute(select(User).where(User.username == form_data.username))
     user = result.scalar_one_or_none()
 
     if not user or not verify_password(form_data.password, user.password):
@@ -101,7 +101,7 @@ async def update_profile(
     tel: str = None,
     avatar: str = None,
     current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db)
+    db: Session = Depends(get_db)
 ):
     if name is not None:
         current_user.name = name
@@ -114,7 +114,7 @@ async def update_profile(
     if avatar is not None:
         current_user.avatar = avatar
 
-    await db.commit()
+    db.commit()
     return {"message": "更新成功"}
 
 
