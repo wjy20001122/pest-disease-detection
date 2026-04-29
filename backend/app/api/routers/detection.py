@@ -1,20 +1,25 @@
 import uuid
 import json
 import asyncio
+import base64
 from datetime import datetime
 from typing import Optional, List, Dict, Any
-from fastapi import APIRouter, Depends, UploadFile, File, Query, HTTPException
+from fastapi import APIRouter, Depends, UploadFile, File, Query, HTTPException, WebSocket, WebSocketDisconnect
 from sqlalchemy import select, desc
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.session import get_db
 from app.db.models import User, ImgRecord, VideoRecord, CameraRecord, Notification
-from app.api.deps import get_current_user
+from app.api.deps import get_current_user, get_current_user_from_header_or_query, decode_token
 from app.services.oss_service import oss_service
 from app.services.detection_router import detection_router, DetectionSource
 from app.services.review_agent import review_agent
 
 router = APIRouter(prefix="/detection", tags=["检测"])
+
+
+camera_ws_sessions: Dict[str, Dict[str, Any]] = {}
+MAX_CAMERA_WS_FRAME_BYTES = 5 * 1024 * 1024
 
 
 async def trigger_review_task(detection_result: Dict, user_id: int, record_id: int, db: AsyncSession):
@@ -219,7 +224,7 @@ async def start_camera_detection(
 
 @router.get("/camera/stream")
 async def get_camera_stream(
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user_from_header_or_query)
 ):
     from fastapi.responses import StreamingResponse
     from app.services.prediction_service import prediction_service
@@ -233,6 +238,127 @@ async def stop_camera_detection(
     from app.services.prediction_service import prediction_service
     result = prediction_service.stop_camera()
     return result
+
+
+@router.websocket("/camera/ws")
+async def camera_ws_detection(
+    websocket: WebSocket,
+    token: str = Query(""),
+    model_key: str = Query("pest"),
+    frame_interval_ms: int = Query(600, ge=100, le=3000),
+):
+    if not token:
+        await websocket.close(code=1008, reason="Missing token")
+        return
+
+    payload = decode_token(token)
+    if not payload or not payload.get("sub"):
+        await websocket.close(code=1008, reason="Invalid token")
+        return
+
+    user_id = str(payload.get("sub"))
+    session_id = str(uuid.uuid4())
+
+    await websocket.accept()
+    camera_ws_sessions[session_id] = {
+        "user_id": user_id,
+        "model_key": model_key,
+        "frame_count": 0,
+        "processed_count": 0,
+        "started_at": datetime.now().isoformat(),
+        "last_result": None,
+        "last_frame_ts": 0.0,
+    }
+
+    await websocket.send_json(
+        {
+            "type": "session_started",
+            "session_id": session_id,
+            "frame_interval_ms": frame_interval_ms,
+        }
+    )
+
+    try:
+        while True:
+            message = await websocket.receive_json()
+            msg_type = message.get("type")
+
+            if msg_type == "stop":
+                await websocket.send_json({"type": "session_stopped", "session_id": session_id})
+                break
+
+            if msg_type != "frame":
+                await websocket.send_json({"type": "error", "message": "Unsupported message type"})
+                continue
+
+            image_data = message.get("image")
+            if not image_data or not isinstance(image_data, str):
+                await websocket.send_json({"type": "error", "message": "Missing frame image"})
+                continue
+
+            camera_ws_sessions[session_id]["frame_count"] += 1
+
+            now_ts = datetime.now().timestamp()
+            min_interval_s = frame_interval_ms / 1000.0
+            last_ts = camera_ws_sessions[session_id].get("last_frame_ts", 0.0)
+            if now_ts - last_ts < min_interval_s:
+                await websocket.send_json(
+                    {
+                        "type": "frame_skipped",
+                        "reason": "rate_limited",
+                        "min_interval_ms": frame_interval_ms,
+                    }
+                )
+                continue
+
+            if "," not in image_data:
+                await websocket.send_json({"type": "error", "message": "Invalid frame format"})
+                continue
+
+            _, b64_data = image_data.split(",", 1)
+
+            try:
+                frame_bytes = base64.b64decode(b64_data)
+            except Exception:
+                await websocket.send_json({"type": "error", "message": "Invalid base64 frame"})
+                continue
+
+            if len(frame_bytes) > MAX_CAMERA_WS_FRAME_BYTES:
+                await websocket.send_json(
+                    {
+                        "type": "error",
+                        "message": "Frame too large",
+                    }
+                )
+                continue
+
+            frame_name = f"camera_ws_{session_id}_{camera_ws_sessions[session_id]['frame_count']}.jpg"
+            frame_url = oss_service.upload_bytes(frame_bytes, frame_name, "camera")
+
+            route_result = await detection_router.route_detection(frame_url)
+
+            camera_ws_sessions[session_id]["processed_count"] += 1
+            camera_ws_sessions[session_id]["last_result"] = route_result
+            camera_ws_sessions[session_id]["last_frame_ts"] = now_ts
+
+            await websocket.send_json(
+                {
+                    "type": "detection_result",
+                    "session_id": session_id,
+                    "frame_url": frame_url,
+                    "source": route_result.get("source"),
+                    "has_pest": route_result.get("has_pest"),
+                    "confirmed_no_pest": route_result.get("confirmed_no_pest", False),
+                    "merged_result": route_result.get("merged_result"),
+                    "ai_analysis": route_result.get("ai_analysis"),
+                    "knowledge_match": route_result.get("knowledge_match"),
+                    "local_detection": route_result.get("local_detection"),
+                }
+            )
+    except WebSocketDisconnect:
+        pass
+    finally:
+        camera_ws_sessions.pop(session_id, None)
 
 
 @router.get("/history")

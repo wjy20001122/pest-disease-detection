@@ -11,10 +11,12 @@ export default defineConfig({
   },
   server: {
     port: 3000,
+    allowedHosts: ['.monkeycode-ai.online'],
     proxy: {
       '/api': {
         target: 'http://localhost:8000',
-        changeOrigin: true
+        changeOrigin: true,
+        ws: true
       },
       '/socket.io': {
         target: 'http://localhost:8000',

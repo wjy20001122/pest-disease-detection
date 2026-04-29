@@ -2,7 +2,7 @@ from datetime import datetime, timedelta
 from typing import Optional
 from jose import JWTError, jwt
 from passlib.context import CryptContext
-from fastapi import Depends, HTTPException, status
+from fastapi import Depends, HTTPException, Query, Security, status
 from fastapi.security import OAuth2PasswordBearer
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -16,6 +16,7 @@ ACCESS_TOKEN_EXPIRE_MINUTES = 120
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/auth/login")
+oauth2_scheme_optional = OAuth2PasswordBearer(tokenUrl="/api/auth/login", auto_error=False)
 
 
 def verify_password(plain_password: str, hashed_password: str) -> bool:
@@ -65,6 +66,36 @@ async def get_current_user(
     result = await db.execute(select(User).where(User.id == int(user_id)))
     user = result.scalar_one_or_none()
 
+    if user is None:
+        raise credentials_exception
+    return user
+
+
+async def get_current_user_from_header_or_query(
+    token: str | None = Security(oauth2_scheme_optional),
+    query_token: str | None = Query(None, alias="token"),
+    db: AsyncSession = Depends(get_db),
+) -> User:
+    credentials_exception = HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="Could not validate credentials",
+        headers={"WWW-Authenticate": "Bearer"},
+    )
+
+    effective_token = token or query_token
+    if not effective_token:
+        raise credentials_exception
+
+    payload = decode_token(effective_token)
+    if payload is None:
+        raise credentials_exception
+
+    user_id: str = payload.get("sub")
+    if user_id is None:
+        raise credentials_exception
+
+    result = await db.execute(select(User).where(User.id == int(user_id)))
+    user = result.scalar_one_or_none()
     if user is None:
         raise credentials_exception
     return user
