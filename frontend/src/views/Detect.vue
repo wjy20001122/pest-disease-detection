@@ -8,6 +8,7 @@
     <div class="detect-tabs">
       <button :class="{ active: tab === 'image' }" @click="tab = 'image'">图像检测</button>
       <button :class="{ active: tab === 'video' }" @click="tab = 'video'">视频检测</button>
+      <button :class="{ active: tab === 'camera' }" @click="tab = 'camera'">摄像头检测</button>
     </div>
 
     <!-- 图像上传区域 -->
@@ -103,6 +104,57 @@
         <button class="detect-btn" @click="startVideoDetect" :disabled="!videoFile || loading">
           {{ loading ? '处理中...' : '开始处理视频' }}
         </button>
+      </div>
+    </div>
+
+    <!-- 摄像头检测区域 -->
+    <div class="detect-content" v-if="!result && tab === 'camera'">
+      <div class="upload-section">
+        <div class="model-section">
+          <p class="section-label">选择检测模型</p>
+          <div class="model-cards">
+            <div
+              v-for="model in models"
+              :key="model.modelKey"
+              :class="['model-card', { active: selectedModel === model.modelKey }]"
+              @click="selectedModel = model.modelKey"
+            >
+              <div class="model-name">{{ model.modelName }}</div>
+              <div class="model-classes">
+                <span v-for="(cls, idx) in model.classes.slice(0, 4)" :key="idx" class="class-tag">
+                  {{ cls }}
+                </span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="camera-preview">
+          <video v-if="cameraRunning" ref="cameraVideo" autoplay playsinline muted></video>
+          <div v-else class="video-placeholder">
+            <p>摄像头未启动</p>
+          </div>
+        </div>
+
+        <canvas ref="cameraCanvas" class="camera-canvas"></canvas>
+
+        <div v-if="cameraResult" class="camera-result card-lite">
+          <p><strong>检测来源：</strong>{{ cameraResult.source || '-' }}</p>
+          <p><strong>是否检测到病虫害：</strong>{{ cameraResult.has_pest ? '是' : '否' }}</p>
+          <p v-if="cameraResult.merged_result?.diseases?.length">
+            <strong>病虫害：</strong>
+            {{ cameraResult.merged_result.diseases.map(d => d.name).join('、') }}
+          </p>
+        </div>
+
+        <div class="camera-actions">
+          <button class="detect-btn" :disabled="loading || cameraRunning" @click="startCameraDetect">
+            {{ loading ? '启动中...' : '开始摄像头检测' }}
+          </button>
+          <button class="btn-outline" :disabled="loading || !cameraRunning" @click="stopCameraDetect">
+            停止摄像头检测
+          </button>
+        </div>
       </div>
     </div>
 
@@ -281,7 +333,7 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { ElMessage } from 'element-plus'
 import { mlApi, detectionApi } from '@/api'
 
@@ -301,6 +353,14 @@ const videoProgress = ref(0)
 const videoProgressText = ref('')
 const videoStats = ref(null)
 const videoSessionId = ref(null)
+const cameraRunning = ref(false)
+const cameraVideo = ref(null)
+const cameraCanvas = ref(null)
+const cameraResult = ref(null)
+
+let cameraMediaStream = null
+let cameraWs = null
+let cameraFrameTimer = null
 
 const severityMap = { high: '严重', medium: '中等', low: '轻微' }
 
@@ -494,6 +554,109 @@ async function cancelVideoProcessing() {
   videoSessionId.value = null
 }
 
+async function startCameraDetect() {
+  loading.value = true
+  try {
+    const token = localStorage.getItem('access_token')
+    if (!token) {
+      ElMessage.error('请先登录')
+      return
+    }
+
+    cameraMediaStream = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode: 'environment' },
+      audio: false
+    })
+
+    if (cameraVideo.value) {
+      cameraVideo.value.srcObject = cameraMediaStream
+    }
+
+    const protocol = window.location.protocol === 'https:' ? 'wss' : 'ws'
+    const host = window.location.host
+    const wsUrl = `${protocol}://${host}/api/detection/camera/ws?token=${encodeURIComponent(token)}&model_key=${encodeURIComponent(selectedModel.value)}&frame_interval_ms=700`
+
+    cameraWs = new WebSocket(wsUrl)
+
+    cameraWs.onmessage = (event) => {
+      try {
+        const msg = JSON.parse(event.data)
+        if (msg.type === 'detection_result') {
+          cameraResult.value = msg
+        } else if (msg.type === 'error') {
+          ElMessage.error(msg.message || '摄像头检测异常')
+        }
+      } catch (err) {
+        console.error(err)
+      }
+    }
+
+    cameraWs.onclose = () => {
+      stopCameraResources()
+    }
+
+    cameraFrameTimer = setInterval(() => {
+      if (!cameraWs || cameraWs.readyState !== WebSocket.OPEN) return
+      if (!cameraVideo.value || !cameraCanvas.value) return
+      if (cameraVideo.value.videoWidth === 0 || cameraVideo.value.videoHeight === 0) return
+
+      cameraCanvas.value.width = cameraVideo.value.videoWidth
+      cameraCanvas.value.height = cameraVideo.value.videoHeight
+      const ctx = cameraCanvas.value.getContext('2d')
+      ctx.drawImage(cameraVideo.value, 0, 0)
+      const imageData = cameraCanvas.value.toDataURL('image/jpeg', 0.75)
+      cameraWs.send(JSON.stringify({ type: 'frame', image: imageData }))
+    }, 700)
+
+    cameraRunning.value = true
+    ElMessage.success('摄像头检测已启动')
+  } catch (e) {
+    console.error(e)
+    ElMessage.error('启动摄像头检测失败')
+  } finally {
+    loading.value = false
+  }
+}
+
+async function stopCameraDetect() {
+  loading.value = true
+  try {
+    if (cameraWs && cameraWs.readyState === WebSocket.OPEN) {
+      cameraWs.send(JSON.stringify({ type: 'stop' }))
+      cameraWs.close()
+    }
+  } catch (e) {
+    console.error(e)
+  } finally {
+    stopCameraResources()
+    loading.value = false
+  }
+}
+
+function stopCameraResources() {
+  if (cameraFrameTimer) {
+    clearInterval(cameraFrameTimer)
+    cameraFrameTimer = null
+  }
+
+  if (cameraWs) {
+    cameraWs.onmessage = null
+    cameraWs.onclose = null
+    cameraWs = null
+  }
+
+  if (cameraMediaStream) {
+    cameraMediaStream.getTracks().forEach(track => track.stop())
+    cameraMediaStream = null
+  }
+
+  if (cameraVideo.value) {
+    cameraVideo.value.srcObject = null
+  }
+
+  cameraRunning.value = false
+}
+
 function reset() {
   result.value = null
   file.value = null
@@ -501,7 +664,15 @@ function reset() {
   videoSessionId.value = null
   videoProcessing.value = false
   videoStats.value = null
+  stopCameraResources()
+  cameraResult.value = null
 }
+
+onUnmounted(async () => {
+  if (cameraRunning.value) {
+    await stopCameraDetect()
+  }
+})
 </script>
 
 <style lang="scss" scoped>
@@ -519,6 +690,51 @@ function reset() {
 .video-player { background: #000; border-radius: var(--radius-lg); overflow: hidden; margin-bottom: 20px;
   video { width: 100%; display: block; max-height: 500px; }
   .video-placeholder { padding: 48px; text-align: center; color: var(--text-muted); }
+}
+.camera-preview {
+  margin-top: 20px;
+  background: #000;
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+
+  video {
+    width: 100%;
+    display: block;
+    max-height: 500px;
+    object-fit: contain;
+  }
+
+  .video-placeholder {
+    padding: 48px;
+    text-align: center;
+    color: var(--text-muted);
+    background: var(--bg-secondary);
+  }
+}
+.camera-canvas {
+  display: none;
+}
+.camera-result {
+  margin-top: 12px;
+  padding: 12px;
+  background: var(--bg-secondary);
+  border-radius: var(--radius-md);
+
+  p {
+    margin: 4px 0;
+    font-size: 13px;
+  }
+}
+.camera-actions {
+  margin-top: 16px;
+  display: flex;
+  gap: 12px;
+
+  .detect-btn,
+  .btn-outline {
+    margin-top: 0;
+    flex: 1;
+  }
 }
 .video-stats { padding: 16px; background: var(--bg-secondary); border-radius: var(--radius-md); margin-bottom: 16px;
   h3 { font-size: 16px; margin-bottom: 12px; }
