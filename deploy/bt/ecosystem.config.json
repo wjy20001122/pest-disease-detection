@@ -1,0 +1,22 @@
+{
+  "name": "pdds-backend",
+  "script": "main.py",
+  "cwd": "/www/pest-disease-detection/backend",
+  "instances": 1,
+  "autorestart": true,
+  "watch": false,
+  "max_memory_restart": "1G",
+  "env": {
+    "PYTHONUNBUFFERED": "1",
+    "DATABASE_URL": "mysql+aiomysql://pddsuser:pddspass@localhost:3306/pdds?charset=utf8mb4",
+    "REDIS_URL": "redis://localhost:6379/0",
+    "OSS_ENDPOINT": "oss-cn-hangzhou.aliyuncs.com",
+    "OSS_ACCESS_KEY_ID": "your-access-key-id",
+    "OSS_ACCESS_KEY_SECRET": "your-access-key-secret",
+    "OSS_BUCKET": "pdds-files",
+    "DEEPSEEK_API_KEY": "your-api-key-here"
+  },
+  "error_file": "/www/wwwlogs/pm2-pdds-backend-error.log",
+  "out_file": "/www/wwwlogs/pm2-pdds-backend-out.log",
+  "log_date_format": "YYYY-MM-DD HH:mm:ss"
+}
