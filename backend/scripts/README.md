@@ -3,6 +3,7 @@
 Run from `backend/` after installing `requirements.txt`.
 
 ```bash
+python -m pytest --tb=short
 python3 scripts/test_tracking_flow.py
 python3 scripts/test_stats_flow.py
 python3 scripts/test_environment_flow.py

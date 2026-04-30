@@ -4,7 +4,8 @@ import argparse
 import json
 from pathlib import Path
 
-from app.db.session import SessionLocal
+import app.db.models  # noqa: F401
+from app.db.session import Base, SessionLocal, engine
 from app.services.knowledge_service import seed_knowledge_items
 
 
@@ -25,6 +26,8 @@ def main() -> None:
         payloads = json.load(f)
     if not isinstance(payloads, list):
         raise SystemExit("Seed file must be a JSON array")
+
+    Base.metadata.create_all(bind=engine)
 
     db = SessionLocal()
     try:
