@@ -243,6 +243,49 @@ class DeepSeekService:
         result = await self.chat_json(messages, temperature=0.3)
         return result
 
+    async def analyze_with_detection_context(
+        self,
+        image_url: str,
+        detection_context: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """基于本地检测结构结果生成AI分析建议（不改本地判定）"""
+        system_prompt = """你是农业病虫害诊断专家。请基于“本地模型检测结果”和图像URL生成辅助分析建议。
+
+要求：
+1. 不要否定本地检测是否命中，只做风险与防治补充；
+2. 结合本地模型类别、数量、置信度、框信息，给出更可执行建议；
+3. 返回严格JSON。
+
+输出格式：
+{
+    "crop_type": "作物类型",
+    "has_pest": true,
+    "no_pest_confidence": 0.0,
+    "diseases": [
+        {
+            "name": "病虫害名称",
+            "confidence": 0.0-1.0,
+            "severity": "low/medium/high",
+            "symptoms": "症状描述",
+            "possible_causes": "可能原因",
+            "prevention": "防治建议"
+        }
+    ],
+    "model_match_keywords": ["关键词1", "关键词2"],
+    "analysis_notes": "说明该建议基于本地检测结构结果生成"
+}"""
+
+        payload = {
+            "image_url": image_url,
+            "local_detection_context": detection_context,
+        }
+        messages = [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": json.dumps(payload, ensure_ascii=False)}
+        ]
+        result = await self.chat_json(messages, temperature=0.2)
+        return result
+
     async def confirm_no_pest(self, image_url: str, initial_result: Dict[str, Any]) -> bool:
         """二次确认是否真的无病虫害
 

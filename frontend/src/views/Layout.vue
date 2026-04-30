@@ -7,6 +7,7 @@
       </div>
       
       <nav class="nav">
+        <div class="nav-section-title" v-show="!collapsed">业务功能</div>
         <router-link to="/" class="nav-item" exact-active-class="active">
           <span class="icon">🏠</span>
           <span class="text" v-show="!collapsed">首页</span>
@@ -35,15 +36,30 @@
           <span class="icon">📈</span>
           <span class="text" v-show="!collapsed">数据统计</span>
         </router-link>
-        <div class="nav-divider"></div>
         <router-link to="/settings" class="nav-item" active-class="active">
           <span class="icon">⚙️</span>
           <span class="text" v-show="!collapsed">设置</span>
         </router-link>
-        <router-link v-if="userStore.isAdmin" to="/admin" class="nav-item" active-class="active">
-          <span class="icon">📊</span>
-          <span class="text" v-show="!collapsed">管理后台</span>
-        </router-link>
+        <template v-if="userStore.isAdmin">
+          <div class="nav-divider"></div>
+          <div class="nav-section-title" v-show="!collapsed">管理工作区</div>
+          <router-link to="/admin/overview" class="nav-item" active-class="active">
+            <span class="icon">📊</span>
+            <span class="text" v-show="!collapsed">管理员概览</span>
+          </router-link>
+          <router-link to="/admin/users" class="nav-item" active-class="active">
+            <span class="icon">👥</span>
+            <span class="text" v-show="!collapsed">用户管理</span>
+          </router-link>
+          <router-link to="/admin/notifications" class="nav-item" active-class="active">
+            <span class="icon">📨</span>
+            <span class="text" v-show="!collapsed">通知治理</span>
+          </router-link>
+          <router-link to="/admin/models" class="nav-item" active-class="active">
+            <span class="icon">🧠</span>
+            <span class="text" v-show="!collapsed">模型运维</span>
+          </router-link>
+        </template>
       </nav>
       
       <div class="sidebar-footer">
@@ -82,7 +98,21 @@ const userStore = useUserStore()
 const collapsed = ref(false)
 const unreadCount = ref(0)
 
-const titles = { Home: '首页概览', Detect: '检测中心', History: '检测历史', Tracking: '虫害跟踪', Knowledge: '病害知识库', QnA: '智能问答', Stats: '数据统计', Notifications: '消息通知', Settings: '个人设置', Admin: '管理后台' }
+const titles = {
+  Home: '首页概览',
+  Detect: '检测中心',
+  History: '检测历史',
+  Tracking: '虫害跟踪',
+  Knowledge: '病害知识库',
+  QnA: '智能问答',
+  Stats: '数据统计',
+  Notifications: '消息通知',
+  Settings: '个人设置',
+  AdminOverview: '管理员概览',
+  AdminUsers: '用户管理',
+  AdminNotifications: '通知治理',
+  AdminModels: '模型运维'
+}
 const pageTitle = computed(() => titles[route.name] || '病虫害检测系统')
 
 async function fetchUnread() {
@@ -118,6 +148,12 @@ onMounted(() => {
 .logo-icon { font-size: 28px; }
 .logo-text { font-size: 16px; font-weight: 600; }
 .nav { flex: 1; padding: 16px 12px; }
+.nav-section-title {
+  padding: 8px 12px;
+  font-size: 12px;
+  color: var(--text-muted);
+  letter-spacing: 0;
+}
 .nav-item {
   display: flex; align-items: center; gap: 12px; padding: 12px; border-radius: var(--radius-md);
   color: var(--text-secondary); text-decoration: none; margin-bottom: 4px;

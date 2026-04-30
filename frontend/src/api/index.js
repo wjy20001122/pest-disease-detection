@@ -147,9 +147,13 @@ export const notificationApi = {
 export const adminApi = {
   dashboard: () => request.get('/admin/dashboard'),
   users: (params) => request.get('/admin/users', { params }),
+  updateUser: (id, data) => request.patch(`/admin/users/${id}`, data),
   stats: (params) => request.get('/admin/stats', { params }),
   models: () => request.get('/admin/models'),
+  updateModel: (modelKey, data) => request.put(`/admin/models/${modelKey}`, data),
   notifications: (params) => request.get('/admin/notifications', { params }),
+  broadcastNotification: (data) => request.post('/admin/notifications/broadcast', data),
+  markAllNotificationsRead: (params) => request.put('/admin/notifications/read-all', null, { params }),
   knowledge: (params) => request.get('/admin/knowledge', { params })
 }
 

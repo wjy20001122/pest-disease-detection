@@ -132,6 +132,24 @@ class ApiKey(Base):
     created_at = Column(DateTime)
 
 
+class ModelPolicy(Base):
+    __tablename__ = "model_policies"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    model_key = Column(String(100), nullable=False, unique=True, index=True)
+    display_name = Column(String(120), nullable=True)
+    enabled = Column(Integer, default=1, nullable=False)
+    is_default = Column(Integer, default=0, nullable=False)
+    fallback_to_cloud = Column(Integer, default=1, nullable=False)
+    fallback_notice = Column(
+        Text,
+        default="本地模型未识别到有效结果，已回退云端分析，结论未必完全可信。",
+        nullable=True,
+    )
+    updated_by = Column(Integer, nullable=True)
+    updated_at = Column(DateTime, nullable=True)
+
+
 USER_FIELDS = {
     "id",
     "username",
@@ -142,6 +160,7 @@ USER_FIELDS = {
     "tel",
     "role",
     "avatar",
+    "is_active",
     "time",
 }
 IMG_RECORD_FIELDS = {

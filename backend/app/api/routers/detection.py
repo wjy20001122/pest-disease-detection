@@ -9,7 +9,7 @@ from sqlalchemy import func, select, desc
 from sqlalchemy.orm import Session
 
 from app.db.session import get_db
-from app.db.models import User, ImgRecord, VideoRecord, CameraRecord
+from app.db.models import User, ImgRecord, VideoRecord, CameraRecord, ModelPolicy
 from app.api.deps import get_current_user, get_current_user_from_header_or_query, decode_token
 from app.api.routers.notifications import create_notification
 from app.services.oss_service import oss_service
@@ -21,6 +21,71 @@ router = APIRouter(prefix="/detection", tags=["检测"])
 
 camera_ws_sessions: Dict[str, Dict[str, Any]] = {}
 MAX_CAMERA_WS_FRAME_BYTES = 5 * 1024 * 1024
+
+DEFAULT_FALLBACK_NOTICE = "本地模型未识别到有效结果，已回退云端分析，结论未必完全可信。"
+
+
+def _resolve_model_policy(
+    db: Session,
+    requested_model_key: str,
+) -> dict[str, Any]:
+    requested = (requested_model_key or "").strip()
+    total_policies = db.scalar(select(func.count()).select_from(ModelPolicy)) or 0
+
+    if total_policies == 0:
+        return {
+            "effective_model_key": requested or "pest",
+            "fallback_to_cloud": True,
+            "fallback_notice": DEFAULT_FALLBACK_NOTICE,
+            "model_switched": False,
+            "switch_message": "",
+        }
+
+    default_policy = db.execute(
+        select(ModelPolicy).where(ModelPolicy.is_default == 1).order_by(ModelPolicy.id.asc())
+    ).scalars().first()
+    if default_policy is None:
+        default_policy = db.execute(select(ModelPolicy).order_by(ModelPolicy.id.asc())).scalars().first()
+
+    requested_policy = None
+    if requested:
+        requested_policy = db.execute(
+            select(ModelPolicy).where(ModelPolicy.model_key == requested)
+        ).scalar_one_or_none()
+
+    chosen_policy = requested_policy or default_policy
+    model_switched = False
+    switch_message = ""
+
+    if chosen_policy is None:
+        return {
+            "effective_model_key": requested or "pest",
+            "fallback_to_cloud": True,
+            "fallback_notice": DEFAULT_FALLBACK_NOTICE,
+            "model_switched": False,
+            "switch_message": "",
+        }
+
+    if not bool(chosen_policy.enabled):
+        if default_policy is not None and bool(default_policy.enabled):
+            chosen_policy = default_policy
+            model_switched = True
+            switch_message = "所选模型已禁用，已切换至默认模型。"
+        else:
+            raise HTTPException(status_code=400, detail="当前模型不可用，请联系管理员启用模型。")
+
+    if requested and chosen_policy.model_key != requested:
+        model_switched = True
+        if not switch_message:
+            switch_message = "所选模型不可用，已切换至默认模型。"
+
+    return {
+        "effective_model_key": chosen_policy.model_key,
+        "fallback_to_cloud": bool(chosen_policy.fallback_to_cloud),
+        "fallback_notice": chosen_policy.fallback_notice or DEFAULT_FALLBACK_NOTICE,
+        "model_switched": model_switched,
+        "switch_message": switch_message,
+    }
 
 
 async def trigger_review_task(detection_result: Dict, user_id: int, record_id: int):
@@ -54,6 +119,7 @@ async def trigger_review_task(detection_result: Dict, user_id: int, record_id: i
 @router.post("/image")
 async def detect_image(
     file: UploadFile = File(...),
+    model_key: str = Query("pest"),
     crop_type: str = Query(""),
     latitude: float = Query(None),
     longitude: float = Query(None),
@@ -68,9 +134,24 @@ async def detect_image(
         raise HTTPException(status_code=400, detail="未上传文件")
 
     file_bytes = await file.read()
-    file_url = oss_service.upload_bytes(file_bytes, file.filename, "images")
+    try:
+        file_url = oss_service.upload_bytes_for_category(file_bytes, file.filename, "images")
+    except Exception:
+        raise HTTPException(status_code=503, detail="OSS上传失败，请检查OSS配置")
+    if not file_url:
+        raise HTTPException(status_code=503, detail="OSS上传失败，请检查OSS配置")
 
-    route_result = await detection_router.route_detection(file_url)
+    policy = _resolve_model_policy(db, model_key)
+    effective_model_key = policy["effective_model_key"]
+
+    route_result = await detection_router.route_detection(
+        file_url,
+        preferred_model_key=effective_model_key,
+        use_local_model=True,
+        allow_cloud_fallback=policy["fallback_to_cloud"],
+        include_ai_advice=True,
+        fallback_notice=policy["fallback_notice"],
+    )
 
     source = route_result.get("source", DetectionSource.CLOUD_AI)
     has_pest = route_result.get("has_pest", True)
@@ -92,7 +173,7 @@ async def detect_image(
 
     out_img = ""
     if local_detection and not local_detection.get("error"):
-        out_img = local_detection.get("image", "")
+        out_img = local_detection.get("outImg") or local_detection.get("image") or ""
 
     record = ImgRecord(
         username=current_user.username,
@@ -112,11 +193,19 @@ async def detect_image(
     response_data = {
         "id": record.id,
         "source": source.value if isinstance(source, DetectionSource) else source,
+        "selected_model": effective_model_key,
         "has_pest": has_pest,
         "confirmed_no_pest": confirmed_no_pest,
+        "maybe_unreliable": route_result.get("maybe_unreliable", False),
+        "confidence_notice": route_result.get("confidence_notice", ""),
+        "model_switched": policy["model_switched"],
+        "model_message": policy["switch_message"],
         "file_path": file_url,
+        "input_image": file_url,
+        "output_image": out_img,
         "created_at": record.startTime,
         "ai_analysis": ai_analysis,
+        "local_detection": local_detection,
         "knowledge_match": knowledge_match,
         "merged_result": merged_result if has_pest else None,
         "labels": labels if has_pest else [],
@@ -157,20 +246,28 @@ async def detect_video(
     if not file.filename:
         raise HTTPException(status_code=400, detail="未上传文件")
 
+    policy = _resolve_model_policy(db, model_key)
+    effective_model_key = policy["effective_model_key"]
+
     file_bytes = await file.read()
-    file_url = oss_service.upload_bytes(file_bytes, file.filename, "videos")
+    try:
+        file_url = oss_service.upload_bytes_for_category(file_bytes, file.filename, "videos")
+    except Exception:
+        raise HTTPException(status_code=503, detail="OSS上传失败，请检查OSS配置")
+    if not file_url:
+        raise HTTPException(status_code=503, detail="OSS上传失败，请检查OSS配置")
 
     from app.services.prediction_service import prediction_service
     session_id = prediction_service.create_video_session(
         input_video=file_url,
-        model_key=model_key,
+        model_key=effective_model_key,
         username=current_user.username,
         conf="0.5"
     )
 
     record = VideoRecord(
         username=current_user.username,
-        modelKey=model_key,
+        modelKey=effective_model_key,
         inputVideo=file_url,
         startTime=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
         trackStats="{}"
@@ -183,6 +280,9 @@ async def detect_video(
         "id": record.id,
         "session_id": session_id,
         "source": "video_detection",
+        "selected_model": effective_model_key,
+        "model_switched": policy["model_switched"],
+        "model_message": policy["switch_message"],
         "file_path": file_url,
         "created_at": record.startTime,
         "status": "processing"
@@ -225,16 +325,23 @@ async def stop_video_detection(
 @router.post("/camera/start")
 async def start_camera_detection(
     model_key: str = Query("pest"),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
 ):
+    policy = _resolve_model_policy(db, model_key)
+    effective_model_key = policy["effective_model_key"]
+
     from app.services.prediction_service import prediction_service
     session_id = prediction_service.start_camera_session(
-        model_key=model_key,
+        model_key=effective_model_key,
         username=current_user.username
     )
     return {
         "session_id": session_id,
-        "status": "started"
+        "status": "started",
+        "selected_model": effective_model_key,
+        "model_switched": policy["model_switched"],
+        "model_message": policy["switch_message"],
     }
 
 
@@ -349,7 +456,14 @@ async def camera_ws_detection(
                 continue
 
             frame_name = f"camera_ws_{session_id}_{camera_ws_sessions[session_id]['frame_count']}.jpg"
-            frame_url = oss_service.upload_bytes(frame_bytes, frame_name, "camera")
+            try:
+                frame_url = oss_service.upload_bytes_for_category(frame_bytes, frame_name, "camera")
+            except Exception:
+                await websocket.send_json({"type": "error", "message": "OSS上传失败，请检查OSS配置"})
+                continue
+            if not frame_url:
+                await websocket.send_json({"type": "error", "message": "OSS上传失败，请检查OSS配置"})
+                continue
 
             route_result = await detection_router.route_detection(frame_url)
 

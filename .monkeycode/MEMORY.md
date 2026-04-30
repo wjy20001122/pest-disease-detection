@@ -77,3 +77,30 @@ Agent 在任务执行过程中发现的条目应遵循以下格式：
   - 本机验收使用 `/tmp/pdds-venv` 运行后端脚本，前端使用 `frontend/node_modules` 和 Vite。
   - 图片检测页会先通过 `/environment/current` 获取环境数据，再以 query 参数随 `/detection/image` 上传提交。
   - 通知模块已改为 `notifications` 表落库，Socket.IO 鉴权支持前端传入的 JWT token。
+
+[管理员与用户分层实现约束]
+- Date: 2026-04-30
+- Context: Agent 在执行“管理员/用户分层改造方案（同页签切换 + 两级 RBAC）”时发现
+- Category: 代码结构
+- Instructions:
+  - 前端管理工作区改为 `/admin/*` 二级路由（`overview/users/notifications/models`），并通过 `meta.requiresAdmin` + 路由守卫控制访问。
+  - 左侧导航按“业务功能 / 管理工作区”分组，管理组仅管理员可见。
+  - 后端 `/admin/*` 接口统一依赖 `get_admin_user`，普通用户访问需返回 403。
+
+[模型策略落库与检测约束]
+- Date: 2026-04-30
+- Context: Agent 在执行管理员模型运维与检测策略联动时发现
+- Category: 代码模式
+- Instructions:
+  - 新增 `model_policies` 表用于控制模型启用状态、默认模型、云端回退开关与提示语。
+  - `/detection/image`、`/detection/video`、`/detection/camera/start` 在执行前需解析模型策略：禁用模型不可直接使用，必要时切换默认模型。
+  - 若策略禁用云端回退，本地模型无有效结果时应直接返回“本地模型优先且不回退云端”的结果，不再强制云端分析。
+
+[检测结果双图展示与AI建议约束]
+- Date: 2026-04-30
+- Context: Agent 在执行“检测上传后前端显示原图+结果图，且AI分析结合检测结果”时发现
+- Category: 代码模式
+- Instructions:
+  - `/detection/image` 返回应包含 `input_image` 与 `output_image`，前端检测结果页需要并排展示原图和检测结果图。
+  - 检测路由优先本地模型，`ai_analysis` 在本地命中时应基于本地检测结构（标签、置信度、框）生成建议，不改变本地命中判定。
+  - 摄像头高频检测默认不开启本地命中后的AI补充分析，避免每帧触发云端调用造成延迟和成本上涨。

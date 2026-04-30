@@ -3,7 +3,7 @@ name: Deploy to Server
 on:
   push:
     branches:
-      - main
+      - master
   workflow_dispatch:
 
 env:
@@ -66,14 +66,14 @@ jobs:
           script: |
             cd /www/pest-disease-detection
 
-            git pull origin main
+            git pull origin master
 
             # 重新安装依赖
             cd frontend && npm ci && npm run build && cd ..
             cd backend && pip install -r requirements.txt
 
             # 重启服务
-            pm2 restart pdds-backend || pm2 start backend/main.py --name pdds-backend
+            pm2 startOrReload deploy/bt/ecosystem.config.json --only pdds-backend
             pm2 restart pdds-frontend || true
 
             # 保存 PM2 状态
@@ -82,6 +82,7 @@ jobs:
   deploy-models:
     runs-on: ubuntu-latest
     needs: deploy
+    if: ${{ hashFiles('model-server/models/**') != '' }}
 
     steps:
       - name: Checkout code

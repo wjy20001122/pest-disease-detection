@@ -1,5 +1,20 @@
 <template>
   <div class="home-page">
+    <template v-if="userStore.isAdmin">
+      <div class="stats-grid admin-grid">
+        <div class="stat-card"><div class="stat-info"><div class="stat-value">{{ adminStats.total_users || 0 }}</div><div class="stat-label">用户总数</div></div></div>
+        <div class="stat-card"><div class="stat-info"><div class="stat-value">{{ adminStats.total_detections || 0 }}</div><div class="stat-label">检测总数</div></div></div>
+        <div class="stat-card"><div class="stat-info"><div class="stat-value">{{ adminStats.active_alerts || 0 }}</div><div class="stat-label">活跃预警</div></div></div>
+        <div class="stat-card"><div class="stat-info"><div class="stat-value">{{ adminStats.enabled_models || 0 }}</div><div class="stat-label">可用模型</div></div></div>
+      </div>
+      <div class="quick-actions">
+        <router-link to="/admin/overview" class="action-card primary"><div><div class="action-title">管理员概览</div><div class="action-desc">查看全局运营状态与检测结构</div></div></router-link>
+        <router-link to="/admin/users" class="action-card"><div><div class="action-title">用户管理</div><div class="action-desc">角色调整、启停用户、治理账号</div></div></router-link>
+        <router-link to="/admin/models" class="action-card"><div><div class="action-title">模型运维</div><div class="action-desc">管理模型可用性与云端回退策略</div></div></router-link>
+      </div>
+    </template>
+
+    <template v-else>
     <div class="stats-grid">
       <div class="stat-card"><div class="stat-icon">📊</div><div class="stat-info"><div class="stat-value">{{ stats.today_count || 0 }}</div><div class="stat-label">今日检测</div></div></div>
       <div class="stat-card"><div class="stat-icon">📈</div><div class="stat-info"><div class="stat-value">{{ stats.total_count || 0 }}</div><div class="stat-label">总检测数</div></div></div>
@@ -38,13 +53,14 @@
         </div>
       </div>
     </div>
+    </template>
   </div>
 </template>
 
 <script setup>
 import { ref, onMounted } from 'vue'
 import { useUserStore } from '@/stores/user'
-import { detectionApi, trackingApi } from '@/api'
+import { detectionApi, trackingApi, adminApi } from '@/api'
 
 const userStore = useUserStore()
 const stats = ref({})
@@ -52,9 +68,15 @@ const recentDetections = ref([])
 const warningCount = ref(0)
 const trackingCount = ref(0)
 const typeMap = { image: '图像', video: '视频', camera: '摄像头' }
+const adminStats = ref({})
 
 onMounted(async () => {
   try {
+    if (userStore.isAdmin) {
+      adminStats.value = await adminApi.dashboard()
+      return
+    }
+
     const [statsRes, historyRes, trackingRes] = await Promise.all([
       detectionApi.stats(),
       detectionApi.history({ page: 1, page_size: 5 }),
@@ -69,6 +91,7 @@ onMounted(async () => {
 
 <style lang="scss" scoped>
 .home-page { max-width: 1200px; margin: 0 auto; }
+.admin-grid .stat-card { padding: 24px; }
 .stats-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 20px; margin-bottom: 24px; }
 .stat-card { background: var(--bg-primary); border-radius: var(--radius-lg); padding: 20px; display: flex; align-items: center; gap: 16px; border: 1px solid var(--border-light); }
 .stat-icon { font-size: 32px; }

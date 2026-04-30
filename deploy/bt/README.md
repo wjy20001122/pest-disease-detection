@@ -1,182 +1,94 @@
-# 宝塔面板部署指南
+# 宝塔面板部署指南（当前仓库）
 
-## 环境要求
+## 1) 目标环境
 
-- 宝塔面板 7.0+
+- 宝塔面板 7+
 - Nginx 1.20+
-- Node.js 18+ (通过宝塔软件商店安装)
-- Python 3.11+ (通过宝塔Python项目管理器)
-- MySQL 8.0+ (通过宝塔软件商店安装)
-- Redis 6+ (通过宝塔软件商店安装)
-- PM2管理器 (通过宝塔软件商店安装)
+- Node.js 18+
+- Python 3.11+
+- PM2 管理器
 
-## 阿里云 OSS 准备
+## 2) 当前仓库关键事实
 
-1. 登录阿里云控制台，开通对象存储 OSS
-2. 创建存储桶，记下：
-   - Endpoint（如：oss-cn-hangzhou.aliyuncs.com）
-   - AccessKey ID 和 AccessKey Secret
-3. 创建存储桶，名称如 `pdds-files`
+- 默认分支：`master`
+- 后端端口：`8000`
+- 前端生产构建目录：`/www/pest-disease-detection/frontend/dist`
+- 前端请求约定：`/api/*`，Nginx 需重写到后端 `/*`
 
-## 部署步骤
+## 3) 数据库与账号（按当前联调）
 
-### 1. 服务器环境准备
+- 数据库：`corn`
+- 用户：`appuser`
+- 密码：`Gwrr76AhsSYwmhde`
+- 主机：`139.129.37.65:3306`
 
-在宝塔面板的软件商店中安装以下软件：
+如需改库名/账号，可在执行部署脚本时通过环境变量覆盖：
 
-| 软件 | 版本 | 用途 |
-|------|------|------|
-| Nginx | 1.20+ | Web服务器/反向代理 |
-| Node.js | 18 LTS | 运行前端 |
-| Python | 3.11 | 运行后端 |
-| MySQL | 8.0+ | 主数据库 |
-| Redis | 6+ | 缓存/消息队列 |
-| PM2管理器 | 最新 | Node进程管理 |
-
-### 2. 创建数据库
-
-在宝塔面板的数据库管理中创建：
-
-```
-数据库名: pdds
-用户名: pddsuser
-密码: pddspass (请修改为强密码)
-编码: utf8mb4
+```bash
+DB_NAME=xxx DB_USER=xxx DB_PASSWORD=xxx DB_HOST=xxx DB_PORT=xxx bash deploy/bt/deploy.sh
 ```
 
-### 3. 上传代码
+## 4) 一键部署
 
-方式一：Git 克隆
+在服务器执行：
+
 ```bash
 cd /www
-git clone git@github.com:your-org/pest-disease-detection.git
-```
-
-方式二：直接上传压缩包到 /www/pest-disease-detection
-
-### 4. 修改配置文件
-
-编辑 `backend/app/core/config.py` 或设置环境变量：
-
-```python
-DATABASE_URL = "mysql+aiomysql://pddsuser:你的密码@localhost:3306/pdds?charset=utf8mb4"
-
-# 阿里云 OSS 配置
-OSS_ENDPOINT = "oss-cn-hangzhou.aliyuncs.com"
-OSS_ACCESS_KEY_ID = "你的AccessKeyID"
-OSS_ACCESS_KEY_SECRET = "你的AccessKeySecret"
-OSS_BUCKET = "pdds-files"
-```
-
-### 5. 安装依赖并构建
-
-```bash
-cd /www/pest-disease-detection/frontend
-npm install
-npm run build
-
-cd /www/pest-disease-detection/backend
-pip install -r requirements.txt
-```
-
-### 6. 配置 Nginx
-
-在宝塔面板中创建网站，复制 `deploy/bt/nginx.conf` 中的配置到网站设置。
-
-**注意**：请修改 `server_name` 为你的域名，并将 SSL 证书路径改为宝塔自动生成的路径。
-
-### 7. 配置 PM2
-
-```bash
+git clone ssh://git@ssh.github.com:443/wjy20001122/pest-disease-detection.git
 cd /www/pest-disease-detection
-pm2 start deploy/bt/ecosystem.config.json
-pm2 save
-pm2 startup
+git checkout master
+bash deploy/bt/deploy.sh
 ```
 
-### 8. 配置 GitHub Actions 自动部署
+## 5) Nginx 配置
 
-在 GitHub 仓库的 Settings -> Secrets 中添加：
+将 `deploy/bt/nginx.conf` 内容复制到宝塔站点配置并替换：
 
-| Secret 名称 | 说明 |
-|-------------|------|
-| SERVER_HOST | 服务器 IP 地址 |
-| SERVER_USER | SSH 用户名 |
-| SERVER_PASSWORD | SSH 密码 |
-| SERVER_PORT | SSH 端口 (默认22) |
+- `server_name` 改为你的域名
+- 证书路径改为宝塔签发证书路径
 
-## 目录结构
+配置已包含：
 
-```
-/www/pest-disease-detection/
-├── backend/              # FastAPI 后端
-│   ├── app/
-│   │   ├── api/         # API 路由
-│   │   ├── core/        # 核心配置
-│   │   ├── models/      # 数据模型
-│   │   └── schemas/     # Pydantic schemas
-│   ├── main.py          # 入口文件
-│   └── requirements.txt
-│
-├── frontend/             # Vue3 前端
-│   ├── dist/            # 构建产物 (Nginx root)
-│   ├── src/             # 源代码
-│   └── package.json
-│
-└── deploy/
-    └── bt/              # 宝塔部署配置
-        ├── nginx.conf
-        ├── ecosystem.config.json
-        └── deploy.sh
-```
+- `/api/* -> 后端 /*` 统一重写
+- `/api/detection/camera/ws` WebSocket 透传
+- `/socket.io/` WebSocket 透传
 
-## 常用命令
+## 6) PM2 服务
+
+部署脚本会加载：
+
+`/www/pest-disease-detection/deploy/bt/ecosystem.config.json`
+
+常用命令：
 
 ```bash
-# 查看日志
-pm2 logs pdds-backend
-
-# 重启服务
-pm2 restart pdds-backend
-
-# 查看状态
 pm2 list
-
-# 更新代码后重载
-cd /www/pest-disease-detection && git pull && pm2 restart pdds-backend
+pm2 logs pdds-backend
+pm2 restart pdds-backend
+pm2 save
 ```
 
-## HTTPS 配置
-
-1. 在宝塔面板中为网站申请 Let's Encrypt 免费证书
-2. 或上传自己的 SSL 证书
-3. 确保证书路径在 nginx.conf 中正确配置
-
-## 故障排查
-
-### 后端无法启动
+## 7) 部署后验收
 
 ```bash
-# 查看错误日志
-pm2 logs pdds-backend --err
-
-# 手动测试
-cd /www/pest-disease-detection/backend
-python main.py
+curl -I http://127.0.0.1:8000/docs
+curl -I http://127.0.0.1
 ```
 
-### 数据库连接失败
+浏览器侧重点验证：
 
-检查 MySQL 服务状态和防火墙设置：
+- 登录/注册
+- 检测页上传（原图+结果图）
+- 跟踪页状态流转
+- 通知已读与全部已读
+- 管理后台（用户/通知/模型）
 
-```bash
-systemctl status mysqld
-firewall-cmd --list-ports
-```
+## 8) GitHub Actions 说明
 
-### 前端资源404
-
-确保 Nginx 的 `root` 路径指向 `frontend/dist` 目录：
-```nginx
-root /www/pest-disease-detection/frontend/dist;
-```
+- 当前 `deploy.yml` 监听 `master`
+- `deploy-models` 仅在 `model-server/models/**` 存在时触发
+- 若使用 Actions 部署，请先配置仓库 Secrets：
+  - `SERVER_HOST`
+  - `SERVER_USER`
+  - `SERVER_PASSWORD`
+  - `SERVER_PORT`

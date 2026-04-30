@@ -46,12 +46,67 @@ class DetectionRouter:
     async def route_detection(
         self,
         image_url: str,
+        preferred_model_key: Optional[str] = None,
         use_local_model: bool = True,
-        force_cloud_only: bool = False
+        force_cloud_only: bool = False,
+        allow_cloud_fallback: bool = True,
+        include_ai_advice: bool = False,
+        fallback_notice: str = "本地模型未识别到有效结果，已回退云端分析，结论未必完全可信。",
     ) -> Dict[str, Any]:
         """
         执行智能检测路由
         """
+        local_result = None
+        selected_model = preferred_model_key or "pest"
+
+        if not force_cloud_only and use_local_model:
+            local_result = await self._local_model_detect(image_url, selected_model)
+            local_result = self._normalize_local_result(local_result)
+            has_local_detection = (
+                local_result
+                and not local_result.get("error")
+                and local_result.get("labels")
+            )
+            if has_local_detection:
+                ai_result = {}
+                if include_ai_advice:
+                    ai_result = await self._analyze_local_detection_with_ai(image_url, local_result)
+                merged_result = self._merge_results(
+                    ai_result or {
+                        "crop_type": "",
+                        "diseases": [],
+                        "analysis_notes": "本次结果基于用户选择的本地模型",
+                    },
+                    local_result,
+                    None,
+                )
+                return {
+                    "source": DetectionSource.LOCAL_MODEL,
+                    "ai_analysis": ai_result,
+                    "has_pest": True,
+                    "knowledge_match": None,
+                    "local_detection": local_result,
+                    "matched_models": [selected_model],
+                    "confirmed_no_pest": False,
+                    "merged_result": merged_result,
+                    "maybe_unreliable": False,
+                    "confidence_notice": "local_model_selected",
+                }
+
+        if not allow_cloud_fallback:
+            return {
+                "source": DetectionSource.NO_PEST,
+                "ai_analysis": {},
+                "has_pest": False,
+                "knowledge_match": None,
+                "local_detection": local_result,
+                "matched_models": [selected_model],
+                "confirmed_no_pest": False,
+                "maybe_unreliable": False,
+                "confidence_notice": "local_model_only",
+                "message": "本地模型未识别到有效结果，且当前已禁用云端回退。",
+            }
+
         ai_result = await self._cloud_ai_analyze(image_url)
 
         if not ai_result or ai_result.get("error"):
@@ -60,15 +115,15 @@ class DetectionRouter:
                 "ai_analysis": ai_result,
                 "has_pest": None,
                 "knowledge_match": None,
-                "local_detection": None,
-                "matched_models": [],
-                "confirmed_no_pest": False
+                "local_detection": local_result,
+                "matched_models": [selected_model],
+                "confirmed_no_pest": False,
+                "maybe_unreliable": True,
+                "confidence_notice": "cloud_fallback_limited_confidence",
+                "message": fallback_notice,
             }
 
         has_pest_ai = ai_result.get("has_pest", False)
-        no_pest_confidence = ai_result.get("no_pest_confidence", 0)
-
-        matched_pests = self._match_pests_from_ai(ai_result)
 
         if force_cloud_only or not use_local_model:
             return {
@@ -77,12 +132,12 @@ class DetectionRouter:
                 "has_pest": has_pest_ai,
                 "knowledge_match": None,
                 "local_detection": None,
-                "matched_models": matched_pests,
-                "confirmed_no_pest": False
+                "matched_models": [selected_model],
+                "confirmed_no_pest": False,
+                "maybe_unreliable": True,
+                "confidence_notice": "cloud_only_limited_confidence",
+                "message": fallback_notice,
             }
-
-        model_key = self._select_best_model(matched_pests)
-        local_result = await self._local_model_detect(image_url, model_key)
 
         has_local_detection = local_result and not local_result.get("error") and local_result.get("labels")
 
@@ -102,9 +157,11 @@ class DetectionRouter:
                         "has_pest": False,
                         "knowledge_match": None,
                         "local_detection": local_result,
-                        "matched_models": matched_pests,
+                        "matched_models": [selected_model],
                         "confirmed_no_pest": True,
-                        "message": "经AI与知识库综合分析，确认图像中无病虫害"
+                        "message": "经AI与知识库综合分析，确认图像中无病虫害",
+                        "maybe_unreliable": True,
+                        "confidence_notice": "cloud_fallback_limited_confidence",
                     }
 
         merged_result = self._merge_results(ai_result, local_result, knowledge_match)
@@ -115,9 +172,12 @@ class DetectionRouter:
             "has_pest": has_local_detection or has_pest_ai,
             "knowledge_match": knowledge_match,
             "local_detection": local_result,
-            "matched_models": matched_pests,
+            "matched_models": [selected_model],
             "confirmed_no_pest": confirmed_no_pest,
-            "merged_result": merged_result
+            "merged_result": merged_result,
+            "maybe_unreliable": not has_local_detection,
+            "confidence_notice": "cloud_fallback_limited_confidence" if not has_local_detection else "local_model_selected",
+            "message": fallback_notice if not has_local_detection else "本地模型已完成检测。",
         }
 
     async def _cloud_ai_analyze(self, image_url: str) -> Dict[str, Any]:
@@ -240,6 +300,138 @@ class DetectionRouter:
             return result
         except Exception as e:
             return {"error": str(e), "detections": [], "labels": []}
+
+    def _normalize_local_result(self, local_result: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+        if not local_result or local_result.get("error"):
+            return local_result
+
+        normalized = dict(local_result)
+
+        labels = normalized.get("labels")
+        if not isinstance(labels, list):
+            raw_labels = normalized.get("label", [])
+            if isinstance(raw_labels, str):
+                try:
+                    raw_labels = json.loads(raw_labels)
+                except Exception:
+                    raw_labels = []
+            labels = raw_labels if isinstance(raw_labels, list) else []
+        normalized["labels"] = labels
+
+        confidences = normalized.get("confidences")
+        if not isinstance(confidences, list):
+            raw_confidences = normalized.get("confidence", [])
+            if isinstance(raw_confidences, str):
+                try:
+                    raw_confidences = json.loads(raw_confidences)
+                except Exception:
+                    raw_confidences = []
+            confidences = raw_confidences if isinstance(raw_confidences, list) else []
+        normalized["confidences"] = confidences
+
+        detections = normalized.get("detections")
+        if not isinstance(detections, list):
+            detections = []
+            boxes = normalized.get("boxes", [])
+            for idx, label in enumerate(labels):
+                conf_raw = confidences[idx] if idx < len(confidences) else 0
+                conf_value = self._parse_confidence(conf_raw)
+                bbox = boxes[idx] if idx < len(boxes) else None
+                detections.append(
+                    {
+                        "class": label,
+                        "class_name": label,
+                        "confidence": conf_value,
+                        "bbox": bbox,
+                    }
+                )
+        normalized["detections"] = detections
+        return normalized
+
+    def _parse_confidence(self, value: Any) -> float:
+        if isinstance(value, (int, float)):
+            number = float(value)
+            return number if number <= 1 else number / 100.0
+        if isinstance(value, str):
+            cleaned = value.strip().replace("%", "")
+            try:
+                number = float(cleaned)
+                return number if number <= 1 else number / 100.0
+            except Exception:
+                return 0.0
+        return 0.0
+
+    def _local_context_for_ai(self, local_result: Dict[str, Any]) -> Dict[str, Any]:
+        labels = local_result.get("labels", [])
+        detections = local_result.get("detections", [])
+        label_counts: Dict[str, int] = {}
+        max_confidence: Dict[str, float] = {}
+        for idx, label in enumerate(labels):
+            label_counts[label] = label_counts.get(label, 0) + 1
+            conf_raw = local_result.get("confidences", [])[idx] if idx < len(local_result.get("confidences", [])) else 0
+            conf_value = self._parse_confidence(conf_raw)
+            max_confidence[label] = max(max_confidence.get(label, 0.0), conf_value)
+
+        summary_items = [
+            {
+                "name": name,
+                "count": count,
+                "max_confidence": round(max_confidence.get(name, 0.0), 4),
+            }
+            for name, count in label_counts.items()
+        ]
+
+        return {
+            "summary": summary_items,
+            "labels": labels,
+            "detections": detections[:30],
+            "detection_count": len(labels),
+        }
+
+    async def _analyze_local_detection_with_ai(self, image_url: str, local_result: Dict[str, Any]) -> Dict[str, Any]:
+        context = self._local_context_for_ai(local_result)
+        self._init_deepseek()
+
+        if not self.deepseek_service.api_key:
+            diseases = []
+            for item in context["summary"]:
+                conf = float(item.get("max_confidence") or 0.0)
+                diseases.append(
+                    {
+                        "name": item.get("name", "未知目标"),
+                        "confidence": conf,
+                        "severity": "high" if conf >= 0.8 else ("medium" if conf >= 0.5 else "low"),
+                        "symptoms": "本地模型检测到该病虫害目标，请结合检测框位置实地复核。",
+                        "possible_causes": "田间环境、虫源扩散或作物长势压力可能导致发生。",
+                        "prevention": "建议优先进行田间复核，随后按知识库和农技规范采取防治措施。",
+                    }
+                )
+            return {
+                "crop_type": "",
+                "has_pest": len(diseases) > 0,
+                "no_pest_confidence": 0.0,
+                "diseases": diseases,
+                "model_match_keywords": context.get("labels", []),
+                "analysis_notes": "未配置DeepSeek，当前建议基于本地检测结果自动生成。",
+            }
+
+        try:
+            result = await self.deepseek_service.analyze_with_detection_context(image_url, context)
+            if isinstance(result, dict):
+                result.setdefault("analysis_notes", "AI建议基于本地检测结构结果生成。")
+                result.setdefault("model_match_keywords", context.get("labels", []))
+                return result
+        except Exception:
+            pass
+
+        return {
+            "crop_type": "",
+            "has_pest": True,
+            "no_pest_confidence": 0.0,
+            "diseases": [],
+            "model_match_keywords": context.get("labels", []),
+            "analysis_notes": "AI建议生成失败，已回退为本地检测结果。",
+        }
 
     def _merge_results(
         self,

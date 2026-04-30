@@ -193,6 +193,23 @@
           </span>
           <button class="btn-ghost" @click="reset">重新检测</button>
         </div>
+        <div class="result-meta" v-if="result.selected_model">
+          使用模型：{{ result.selected_model }}
+        </div>
+        <div class="fallback-warning" v-if="result.maybe_unreliable">
+          云端回退分析：结论未必完全可信，请结合现场复核。
+        </div>
+
+        <div class="image-compare" v-if="result.input_image || result.file_path || result.output_image">
+          <div class="image-panel">
+            <p class="image-title">上传原图</p>
+            <img :src="result.input_image || result.file_path" alt="上传原图" />
+          </div>
+          <div class="image-panel" v-if="result.output_image">
+            <p class="image-title">检测结果图</p>
+            <img :src="result.output_image" alt="检测结果图" />
+          </div>
+        </div>
 
         <div v-if="!result.has_pest" class="no-pest-message">
           <div class="no-pest-icon">🌿</div>
@@ -247,7 +264,7 @@
               </div>
             </div>
 
-            <div v-if="result.ai_analysis?.diseases?.length && result.source === 'cloud_ai'" class="ai-analysis">
+            <div v-if="result.ai_analysis?.diseases?.length" class="ai-analysis">
               <h3>AI 分析建议</h3>
               <div v-for="(disease, idx) in result.ai_analysis.diseases" :key="idx" class="ai-disease">
                 <p><strong>{{ disease.name }}</strong> ({{ (disease.confidence * 100).toFixed(0) }}%)</p>
@@ -467,6 +484,7 @@ async function startImageDetect() {
     const formData = new FormData()
     formData.append('file', file.value)
     const params = {}
+    params.model_key = selectedModel.value
     if (location.value.lat) {
       params.latitude = location.value.lat
       params.longitude = location.value.lng
@@ -820,6 +838,34 @@ onUnmounted(async () => {
 .result-card { background: var(--bg-primary); border-radius: var(--radius-lg); border: 1px solid var(--border-light); padding: 24px; }
 .result-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; }
 .source-tag { padding: 6px 16px; border-radius: 20px; font-size: 14px; font-weight: 500; &.local_model { background: #d1fae5; color: #065f46; } &.cloud_ai { background: #dbeafe; color: #1e40af; } &.confirmed_no_pest { background: #d1fae5; color: #065f46; } }
+.result-meta { font-size: 13px; color: var(--text-secondary); margin-bottom: 8px; }
+.fallback-warning { margin-bottom: 12px; padding: 10px 12px; border-radius: var(--radius-md); background: #fff7ed; border: 1px solid #fed7aa; color: #9a3412; font-size: 13px; }
+.image-compare {
+  margin-bottom: 16px;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+.image-panel {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-light);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+}
+.image-title {
+  margin: 0;
+  padding: 10px 12px;
+  font-size: 13px;
+  color: var(--text-secondary);
+  border-bottom: 1px solid var(--border-light);
+}
+.image-panel img {
+  display: block;
+  width: 100%;
+  max-height: 360px;
+  object-fit: contain;
+  background: #111827;
+}
 .btn-ghost { padding: 8px 16px; background: transparent; border: 1px solid var(--border); border-radius: var(--radius-md); cursor: pointer; &:hover { background: var(--bg-secondary); } }
 .result-stats { display: flex; gap: 24px; margin-bottom: 20px; padding: 16px; background: var(--bg-secondary); border-radius: var(--radius-md); }
 .stat-item { text-align: center; .stat-value { font-size: 32px; font-weight: 700; color: var(--primary); } .stat-label { font-size: 13px; color: var(--text-secondary); } }
@@ -842,4 +888,9 @@ onUnmounted(async () => {
 }
 .ai-disease { padding: 12px; background: var(--bg-secondary); border-radius: var(--radius-md); margin-bottom: 8px; p { margin: 4px 0; } }
 .disease-desc { font-size: 13px; color: var(--text-secondary); p { margin: 4px 0; } }
+@media (max-width: 768px) {
+  .image-compare {
+    grid-template-columns: 1fr;
+  }
+}
 </style>

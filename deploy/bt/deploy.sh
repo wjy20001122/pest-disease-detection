@@ -7,6 +7,13 @@ set -e
 PROJECT_DIR="/www/pest-disease-detection"
 BACKEND_DIR="$PROJECT_DIR/backend"
 FRONTEND_DIR="$PROJECT_DIR/frontend"
+REPO_URL="${REPO_URL:-ssh://git@ssh.github.com:443/wjy20001122/pest-disease-detection.git}"
+DEPLOY_BRANCH="${DEPLOY_BRANCH:-master}"
+DB_NAME="${DB_NAME:-corn}"
+DB_USER="${DB_USER:-appuser}"
+DB_PASSWORD="${DB_PASSWORD:-Gwrr76AhsSYwmhde}"
+DB_HOST="${DB_HOST:-139.129.37.65}"
+DB_PORT="${DB_PORT:-3306}"
 
 echo "=========================================="
 echo "  病虫害检测系统 - 宝塔一键部署"
@@ -20,20 +27,27 @@ cd $PROJECT_DIR
 # 克隆/更新代码
 echo "[2/7] 拉取最新代码..."
 if [ ! -d ".git" ]; then
-    git clone git@github.com:your-org/pest-disease-detection.git $PROJECT_DIR
+    git clone "$REPO_URL" $PROJECT_DIR
+    cd $PROJECT_DIR
+    git checkout "$DEPLOY_BRANCH"
 else
-    git pull origin main
+    git fetch origin
+    git checkout "$DEPLOY_BRANCH"
+    git pull origin "$DEPLOY_BRANCH"
 fi
 
 # 创建数据库
 echo "[3/7] 创建数据库..."
-mysql -u root -p -e "CREATE DATABASE IF NOT EXISTS pdds CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;"
-mysql -u root -p pdds < $PROJECT_DIR/scripts/init_db.sql
+mysql -u root -p -e "CREATE DATABASE IF NOT EXISTS \`$DB_NAME\` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;"
+mysql -u root -p -e "CREATE USER IF NOT EXISTS '$DB_USER'@'%' IDENTIFIED BY '$DB_PASSWORD';"
+mysql -u root -p -e "ALTER USER '$DB_USER'@'%' IDENTIFIED BY '$DB_PASSWORD';"
+mysql -u root -p -e "GRANT ALL PRIVILEGES ON \`$DB_NAME\`.* TO '$DB_USER'@'%'; FLUSH PRIVILEGES;"
+mysql -u root -p "$DB_NAME" < $PROJECT_DIR/scripts/init_db.sql
 
 # 安装前端依赖
 echo "[4/7] 安装前端依赖..."
 cd $FRONTEND_DIR
-npm install
+npm ci
 
 # 构建前端
 echo "[5/7] 构建前端..."
@@ -42,17 +56,16 @@ npm run build
 # 安装后端依赖
 echo "[6/7] 安装后端依赖..."
 cd $BACKEND_DIR
-pip install -r requirements.txt
+python3 -m pip install -r requirements.txt
 
 # 初始化数据库
 echo "[7/7] 初始化数据库..."
 cd $PROJECT_DIR
-python scripts/init_db.py
+python3 scripts/init_db.py
 
 # 配置 PM2
 echo "[8/8] 配置 PM2..."
-pm2 delete pdds-backend 2>/dev/null || true
-pm2 start $PROJECT_DIR/deploy/bt/ecosystem.config.json
+pm2 startOrReload $PROJECT_DIR/deploy/bt/ecosystem.config.json --only pdds-backend
 pm2 save
 
 # 设置开机自启
@@ -63,13 +76,9 @@ echo "=========================================="
 echo "  部署完成!"
 echo "=========================================="
 echo ""
-echo "访问地址: http://your-server-ip:3000"
+echo "访问地址: https://your-domain"
 echo "后端API: http://your-server-ip:8000"
 echo "API文档: http://your-server-ip:8000/docs"
-echo ""
-echo "默认管理员账户:"
-echo "  用户名: admin"
-echo "  密码: admin123"
 echo ""
 echo "常用命令:"
 echo "  pm2 logs pdds-backend    - 查看后端日志"

@@ -68,6 +68,8 @@ async def get_current_user(
 
     if user is None:
         raise credentials_exception
+    if user.is_active == 0:
+        raise HTTPException(status_code=400, detail="用户已被禁用")
     return user
 
 
@@ -102,7 +104,7 @@ async def get_current_user_from_header_or_query(
 
 
 async def get_current_active_user(current_user: User = Depends(get_current_user)) -> User:
-    if not current_user.is_active:
+    if current_user.is_active == 0:
         raise HTTPException(status_code=400, detail="Inactive user")
     return current_user
 

@@ -1,4 +1,5 @@
 from datetime import timedelta
+import logging
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy import select
@@ -12,6 +13,7 @@ from app.api.deps import (
 )
 
 router = APIRouter(prefix="/auth", tags=["认证"])
+logger = logging.getLogger(__name__)
 
 
 @router.post("/register")
@@ -49,17 +51,31 @@ async def login(
     form_data: OAuth2PasswordRequestForm = Depends(),
     db: Session = Depends(get_db)
 ):
-    result = db.execute(select(User).where(User.username == form_data.username))
+    result = db.execute(
+        select(User).where(
+            (User.username == form_data.username) | (User.email == form_data.username)
+        )
+    )
     user = result.scalar_one_or_none()
 
-    if not user or not verify_password(form_data.password, user.password):
+    if not user:
+        logger.warning("login_failed reason=user_not_found username=%s", form_data.username)
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="用户名或密码错误",
             headers={"WWW-Authenticate": "Bearer"},
         )
 
-    if not user.is_active:
+    if not verify_password(form_data.password, user.password):
+        logger.warning("login_failed reason=password_mismatch username=%s", form_data.username)
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="用户名或密码错误",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+    if user.is_active == 0:
+        logger.warning("login_failed reason=user_disabled username=%s", form_data.username)
         raise HTTPException(status_code=400, detail="用户已被禁用")
 
     access_token = create_access_token(

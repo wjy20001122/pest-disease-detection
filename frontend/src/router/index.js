@@ -28,7 +28,18 @@ const routes = [
       { path: 'notifications', name: 'Notifications', component: () => import('@/views/Notifications.vue') },
       { path: 'stats', name: 'Stats', component: () => import('@/views/Stats.vue') },
       { path: 'settings', name: 'Settings', component: () => import('@/views/Settings.vue') },
-      { path: 'admin', name: 'Admin', component: () => import('@/views/admin/Dashboard.vue'), meta: { requiresAdmin: true } }
+      {
+        path: 'admin',
+        component: () => import('@/views/admin/AdminLayout.vue'),
+        meta: { requiresAdmin: true },
+        children: [
+          { path: '', redirect: '/admin/overview' },
+          { path: 'overview', name: 'AdminOverview', component: () => import('@/views/admin/Overview.vue'), meta: { requiresAdmin: true } },
+          { path: 'users', name: 'AdminUsers', component: () => import('@/views/admin/Users.vue'), meta: { requiresAdmin: true } },
+          { path: 'notifications', name: 'AdminNotifications', component: () => import('@/views/admin/Notifications.vue'), meta: { requiresAdmin: true } },
+          { path: 'models', name: 'AdminModels', component: () => import('@/views/admin/Models.vue'), meta: { requiresAdmin: true } }
+        ]
+      }
     ]
   }
 ]
@@ -38,10 +49,19 @@ const router = createRouter({
   routes
 })
 
-router.beforeEach((to, from, next) => {
+router.beforeEach(async (to, from, next) => {
   const userStore = useUserStore()
-  const token = localStorage.getItem('access_token')
+  let token = localStorage.getItem('access_token')
   
+  if (token && !userStore.user) {
+    try {
+      await userStore.fetchUser()
+    } catch {
+      // fetchUser 内部会处理失效 token
+    }
+    token = localStorage.getItem('access_token')
+  }
+
   if (to.meta.requiresAuth && !token) {
     next('/login')
   } else if (to.meta.guest && token) {
