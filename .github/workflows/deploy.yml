@@ -89,13 +89,22 @@ jobs:
   deploy-models:
     runs-on: ubuntu-latest
     needs: deploy
-    if: ${{ hashFiles('model-server/models/**') != '' }}
 
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
 
+      - name: Check model files
+        id: check_models
+        run: |
+          if [ -d "model-server/models" ] && [ -n "$(ls -A model-server/models 2>/dev/null)" ]; then
+            echo "has_models=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "has_models=false" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Deploy models to server
+        if: ${{ steps.check_models.outputs.has_models == 'true' }}
         uses: appleboy/scp-action@v0.1
         with:
           host: ${{ secrets.SERVER_HOST }}
