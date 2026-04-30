@@ -12,6 +12,7 @@ import uuid
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
+from typing import Callable
 
 import cv2
 import numpy as np
@@ -705,6 +706,268 @@ class PredictionService:
                 with self.sessions_lock:
                     self.video_sessions.pop(session.session_id, None)
 
+    def process_video_task(
+        self,
+        task_session_id: str,
+        input_video: str,
+        model_key: str,
+        username: str,
+        conf: str = "0.5",
+        should_stop: Callable[[], bool] | None = None,
+        progress_callback: Callable[[JSONDict], None] | None = None,
+    ) -> JSONDict:
+        session = VideoSession(task_session_id)
+        kind, model_name = self._resolve_kind(model_key)
+        session.data.update(
+            {
+                "username": username,
+                "weight": model_name,
+                "conf": conf,
+                "startTime": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                "inputVideo": input_video,
+                "kind": kind,
+                "modelKey": model_key,
+                "sessionId": task_session_id,
+                "progress": 0,
+                "frame_count": 0,
+                "total_counts": {},
+                "total_tracks": 0,
+                "detections": [],
+            }
+        )
+        session.data_collector = DataCollector(oss_service, task_session_id, "video")
+
+        if progress_callback:
+            progress_callback(
+                {
+                    "status": "queued",
+                    "progress": 0.0,
+                    "frame_count": 0,
+                    "total_counts": {},
+                    "total_tracks": 0,
+                    "detections": [],
+                }
+            )
+
+        try:
+            try:
+                if input_video.startswith("/"):
+                    local_source_path = self._resolve_local_path(input_video)
+                    shutil.copy2(local_source_path, session.download_path)
+                else:
+                    self._download_file(input_video, session.download_path)
+            except Exception as exc:
+                logger.exception("Video download failed")
+                return {"status": "failed", "error": f"Video download failed: {exc}"}
+
+            if not session.download_path.exists() or session.download_path.stat().st_size == 0:
+                return {"status": "failed", "error": "Downloaded video file is empty or missing"}
+
+            cap = cv2.VideoCapture(str(session.download_path))
+            if not cap.isOpened():
+                return {"status": "failed", "error": "Unable to open the downloaded video file"}
+
+            session.cap = cap
+            model_config = self.runtime.config.get_model_config(kind)
+            conf_threshold = model_config.get("conf_threshold", float(session.data.get("conf", 0.5)))
+            tracker_type = self.runtime.tracker_config.DEFAULT_TRACKER
+            original_fps = int(cap.get(cv2.CAP_PROP_FPS)) or 25
+            total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+            width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+            height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+
+            session.video_writer = cv2.VideoWriter(
+                str(session.video_output_path),
+                cv2.VideoWriter_fourcc(*"mp4v"),
+                original_fps,
+                (width, height),
+            )
+            session.tracker = self.runtime.TrackerPredictor(
+                kind=kind,
+                conf=conf_threshold,
+                tracker_type=tracker_type,
+                reset_id=True,
+            )
+            session.is_processing = True
+
+            frame_count = 0
+            keyframe_interval = max(1, original_fps // 2)
+            all_detections = []
+            keyframe_count = 0
+
+            while cap.isOpened() and not session.stop_flag:
+                if should_stop and should_stop():
+                    session.stop_flag = True
+                    break
+
+                ret, frame = cap.read()
+                if not ret:
+                    break
+
+                frame_count += 1
+                original_frame = frame.copy()
+                results = session.tracker.track_frame(frame)
+                processed_frame = session.tracker.draw_detections(original_frame, results, show_stats=False)
+
+                detections = results.get("detections", [])
+                for det in detections:
+                    track_id = det.get("track_id")
+                    if track_id is None:
+                        continue
+                    detection_info = {
+                        "track_id": track_id,
+                        "class": det.get("class_name", "unknown"),
+                        "confidence": det.get("confidence", 0),
+                        "frame": frame_count,
+                        "bbox": det.get("bbox", [0, 0, 0, 0]),
+                    }
+                    all_detections.append(detection_info)
+                    if session.data_collector:
+                        session.data_collector.collect_detection(
+                            original_frame,
+                            track_id,
+                            det.get("class_name", "unknown"),
+                            det.get("bbox", [0, 0, 0, 0]),
+                            det.get("confidence", 0),
+                        )
+
+                if frame_count % keyframe_interval == 0:
+                    keyframe_count += 1
+
+                stats = results.get("stats", {})
+                progress = (frame_count / total_frames * 100) if total_frames > 0 else 0
+                session.data["progress"] = progress
+                session.data["frame_count"] = frame_count
+                session.data["total_counts"] = stats.get("total_counts", {})
+                session.data["total_tracks"] = stats.get("total_tracks", 0)
+                session.data["detections"] = all_detections[-100:]
+
+                if progress_callback and (
+                    frame_count == 1
+                    or frame_count % keyframe_interval == 0
+                    or (total_frames > 0 and frame_count >= total_frames)
+                ):
+                    progress_callback(
+                        {
+                            "status": "processing",
+                            "progress": round(progress, 1),
+                            "frame_count": frame_count,
+                            "total_counts": session.data.get("total_counts", {}),
+                            "total_tracks": int(session.data.get("total_tracks", 0)),
+                            "detections": list(session.data.get("detections", [])),
+                            "keyframe_count": keyframe_count,
+                        }
+                    )
+
+                track_stats = {
+                    "sessionId": task_session_id,
+                    "total_counts": stats.get("total_counts", {}),
+                    "current_frame": stats.get("current_frame", {}),
+                    "total_tracks": stats.get("total_tracks", 0),
+                    "class_count": sum(
+                        1 for count in (stats.get("current_frame", {}) or {}).values() if count > 0
+                    ),
+                    "interval": results.get("interval", 1),
+                    "video_fps": original_fps,
+                    "processing_fps": 0.0,
+                    "frame_count": frame_count,
+                    "total_frames": total_frames,
+                    "progress": round(progress, 1),
+                    "keyframe_count": keyframe_count,
+                    "bayesian_stats": stats.get("bayesian_stats", {}),
+                }
+                socket_manager.emit_nowait("track_stats", track_stats)
+                session.video_writer.write(processed_frame)
+
+            self._cleanup_video_session(session)
+
+            final_stats = session.tracker.get_stats() if session.tracker else {}
+            total_counts = session.data.get("total_counts", {})
+            total_tracks = int(session.data.get("total_tracks", 0))
+            detections_tail = list(session.data.get("detections", []))
+
+            if session.stop_flag:
+                if progress_callback:
+                    progress_callback(
+                        {
+                            "status": "stopped",
+                            "progress": round(float(session.data.get("progress", 0.0)), 1),
+                            "frame_count": int(session.data.get("frame_count", 0)),
+                            "total_counts": total_counts,
+                            "total_tracks": total_tracks,
+                            "detections": detections_tail,
+                        }
+                    )
+                return {
+                    "status": "stopped",
+                    "frame_count": int(session.data.get("frame_count", 0)),
+                    "total_counts": total_counts,
+                    "total_tracks": total_tracks,
+                    "detections": detections_tail,
+                }
+
+            for progress_val in self.convert_avi_to_mp4(session.video_output_path, session.output_path):
+                socket_manager.emit_nowait("progress", {"sessionId": task_session_id, "data": progress_val})
+
+            uploaded_url = oss_service.upload_file(session.output_path, "video_predict")
+            session.data["outVideo"] = uploaded_url
+            session.data["trackStats"] = json.dumps(final_stats, ensure_ascii=False)
+
+            create_video_record(
+                {
+                    "username": session.data.get("username", ""),
+                    "modelKey": session.data.get("modelKey", ""),
+                    "startTime": session.data.get("startTime", ""),
+                    "inputVideo": session.data.get("inputVideo", ""),
+                    "outVideo": session.data.get("outVideo", ""),
+                    "trackStats": session.data.get("trackStats", ""),
+                }
+            )
+
+            if session.data_collector:
+                summary = session.data_collector.save_summary(session.data.get("username", ""))
+                if summary:
+                    create_data_collection_record(summary)
+                    socket_manager.emit_nowait(
+                        "data_collection_complete",
+                        {"sessionId": task_session_id, "summary": summary},
+                    )
+
+            if progress_callback:
+                progress_callback(
+                    {
+                        "status": "completed",
+                        "progress": 100.0,
+                        "frame_count": int(session.data.get("frame_count", 0)),
+                        "total_counts": total_counts,
+                        "total_tracks": total_tracks,
+                        "detections": detections_tail,
+                        "output_url": uploaded_url,
+                    }
+                )
+
+            return {
+                "status": "completed",
+                "output_url": uploaded_url,
+                "frame_count": int(session.data.get("frame_count", 0)),
+                "total_counts": total_counts,
+                "total_tracks": total_tracks,
+                "detections": detections_tail,
+            }
+        except Exception as exc:
+            logger.exception("Video task processing failed")
+            return {
+                "status": "failed",
+                "error": str(exc),
+                "frame_count": int(session.data.get("frame_count", 0)),
+                "total_counts": session.data.get("total_counts", {}),
+                "total_tracks": int(session.data.get("total_tracks", 0)),
+                "detections": list(session.data.get("detections", [])),
+            }
+        finally:
+            self._cleanup_video_session(session)
+            self._cleanup_video_files(session)
+
     def get_video_session_status(self, session_id: str) -> JSONDict | None:
         with self.sessions_lock:
             session = self.video_sessions.get(session_id)
@@ -1262,4 +1525,3 @@ class PredictionService:
 
 
 prediction_service = PredictionService()
-

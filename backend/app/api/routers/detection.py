@@ -2,10 +2,11 @@ import uuid
 import json
 import asyncio
 import base64
+import logging
 from datetime import datetime, timedelta
 from typing import Optional, List, Dict, Any
 from fastapi import APIRouter, Depends, UploadFile, File, Query, HTTPException, WebSocket, WebSocketDisconnect
-from sqlalchemy import func, select, desc
+from sqlalchemy import and_, desc, func, literal, select, union_all
 from sqlalchemy.orm import Session
 
 from app.db.session import get_db
@@ -15,8 +16,17 @@ from app.api.routers.notifications import create_notification
 from app.services.oss_service import oss_service
 from app.services.detection_router import detection_router, DetectionSource
 from app.services.review_agent import review_agent
+from app.services.video_task_service import (
+    create_video_task_record,
+    get_owned_video_task,
+    mark_video_task_failed,
+    request_stop_video_task,
+    to_status_payload,
+)
+from app.services.system_config_service import get_system_config_int
 
 router = APIRouter(prefix="/detection", tags=["检测"])
+logger = logging.getLogger(__name__)
 
 
 camera_ws_sessions: Dict[str, Dict[str, Any]] = {}
@@ -90,8 +100,11 @@ def _resolve_model_policy(
 
 async def trigger_review_task(detection_result: Dict, user_id: int, record_id: int):
     """后台任务：触发智能体审查"""
+    payload = dict(detection_result)
+    payload["record_id"] = record_id
+    payload["user_id"] = user_id
     try:
-        review_result = await review_agent.review(detection_result)
+        review_result = await review_agent.review(payload)
 
         if review_result and review_result.get("status") == "warning":
             warning = review_result.get("warning", {})
@@ -113,14 +126,18 @@ async def trigger_review_task(detection_result: Dict, user_id: int, record_id: i
                     related_detection_id=record_id,
                 )
     except Exception:
-        pass
+        logger.exception(
+            "Review task failed",
+            extra={"record_id": record_id, "user_id": user_id},
+        )
 
 
 @router.post("/image")
 async def detect_image(
     file: UploadFile = File(...),
-    model_key: str = Query("pest"),
-    crop_type: str = Query(""),
+    model_key: str = Query("", description="管理员可选：直连本地模型键"),
+    crop_type: str = Query("", description="作物类型：玉米/小麦/水稻"),
+    category: str = Query("", description="类别：病害/虫害"),
     latitude: float = Query(None),
     longitude: float = Query(None),
     address: str = Query(""),
@@ -141,17 +158,31 @@ async def detect_image(
     if not file_url:
         raise HTTPException(status_code=503, detail="OSS上传失败，请检查OSS配置")
 
-    policy = _resolve_model_policy(db, model_key)
-    effective_model_key = policy["effective_model_key"]
+    normalized_model_key = (model_key or "").strip()
+    normalized_crop_type = (crop_type or "").strip()
+    normalized_category = (category or "").strip()
+    is_admin_direct = current_user.role == "admin" and bool(normalized_model_key)
+
+    if not is_admin_direct:
+        if not normalized_crop_type or not normalized_category:
+            raise HTTPException(status_code=422, detail="普通用户检测必须选择作物和病虫害类别")
+
+    policy = _resolve_model_policy(db, normalized_model_key or "pest")
 
     route_result = await detection_router.route_detection(
         file_url,
-        preferred_model_key=effective_model_key,
+        db=db,
+        preferred_model_key=policy["effective_model_key"] if is_admin_direct else None,
+        crop_type=normalized_crop_type,
+        category=normalized_category,
+        enforce_user_selection=not is_admin_direct,
+        skip_ai_routing=is_admin_direct,
         use_local_model=True,
-        allow_cloud_fallback=policy["fallback_to_cloud"],
-        include_ai_advice=True,
+        allow_cloud_fallback=(False if is_admin_direct else policy["fallback_to_cloud"]),
+        include_ai_advice=not is_admin_direct,
         fallback_notice=policy["fallback_notice"],
     )
+    selected_model = (route_result.get("matched_models") or ["pest"])[0]
 
     source = route_result.get("source", DetectionSource.CLOUD_AI)
     has_pest = route_result.get("has_pest", True)
@@ -178,7 +209,7 @@ async def detect_image(
     record = ImgRecord(
         username=current_user.username,
         modelKey=source.value if isinstance(source, DetectionSource) else source,
-        cropType=crop_type or merged_result.get("crop_type", ""),
+        cropType=normalized_crop_type or merged_result.get("crop_type", ""),
         inputImg=file_url,
         outImg=out_img,
         startTime=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
@@ -193,13 +224,17 @@ async def detect_image(
     response_data = {
         "id": record.id,
         "source": source.value if isinstance(source, DetectionSource) else source,
-        "selected_model": effective_model_key,
+        "selected_model": selected_model,
         "has_pest": has_pest,
         "confirmed_no_pest": confirmed_no_pest,
         "maybe_unreliable": route_result.get("maybe_unreliable", False),
         "confidence_notice": route_result.get("confidence_notice", ""),
         "model_switched": policy["model_switched"],
-        "model_message": policy["switch_message"],
+        "model_message": (
+            policy["switch_message"]
+            if not is_admin_direct
+            else (policy["switch_message"] or "管理员直连模型模式")
+        ),
         "file_path": file_url,
         "input_image": file_url,
         "output_image": out_img,
@@ -207,6 +242,7 @@ async def detect_image(
         "ai_analysis": ai_analysis,
         "local_detection": local_detection,
         "knowledge_match": knowledge_match,
+        "knowledge_candidates": route_result.get("knowledge_candidates", []),
         "merged_result": merged_result if has_pest else None,
         "labels": labels if has_pest else [],
         "confidences": confidences if has_pest else [],
@@ -257,34 +293,46 @@ async def detect_video(
     if not file_url:
         raise HTTPException(status_code=503, detail="OSS上传失败，请检查OSS配置")
 
-    from app.services.prediction_service import prediction_service
-    session_id = prediction_service.create_video_session(
-        input_video=file_url,
-        model_key=effective_model_key,
+    session_id = uuid.uuid4().hex
+    task = create_video_task_record(
+        db,
+        session_id=session_id,
         username=current_user.username,
-        conf="0.5"
+        model_key=effective_model_key,
     )
 
-    record = VideoRecord(
-        username=current_user.username,
-        modelKey=effective_model_key,
-        inputVideo=file_url,
-        startTime=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-        trackStats="{}"
-    )
-    db.add(record)
-    db.commit()
-    db.refresh(record)
+    try:
+        from app.tasks.video_tasks import process_video_detection
+
+        process_video_detection.apply_async(
+            kwargs={
+                "session_id": session_id,
+                "input_video": file_url,
+                "model_key": effective_model_key,
+                "username": current_user.username,
+                "conf": "0.5",
+            },
+            task_id=session_id,
+            soft_time_limit=get_system_config_int(db, "video_task_soft_time_limit_sec"),
+            time_limit=get_system_config_int(db, "video_task_hard_time_limit_sec"),
+        )
+    except Exception as exc:
+        mark_video_task_failed(
+            db,
+            session_id=session_id,
+            error_message=f"视频任务入队失败: {exc}",
+        )
+        raise HTTPException(status_code=503, detail="视频任务队列不可用，请检查Redis/Celery服务")
 
     return {
-        "id": record.id,
+        "id": task.id,
         "session_id": session_id,
         "source": "video_detection",
         "selected_model": effective_model_key,
         "model_switched": policy["model_switched"],
         "model_message": policy["switch_message"],
         "file_path": file_url,
-        "created_at": record.startTime,
+        "created_at": task.created_at.strftime("%Y-%m-%d %H:%M:%S"),
         "status": "processing"
     }
 
@@ -292,34 +340,49 @@ async def detect_video(
 @router.get("/video/{session_id}/status")
 async def get_video_status(
     session_id: str,
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
 ):
-    from app.services.prediction_service import prediction_service
-    status = prediction_service.get_video_session_status(session_id)
-    if not status:
+    task = get_owned_video_task(db, session_id, current_user.username)
+    if not task:
         raise HTTPException(status_code=404, detail="会话不存在或已过期")
-    return status
+    return to_status_payload(task)
 
 
 @router.get("/video/{session_id}/stream")
 async def get_video_stream(
     session_id: str,
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
 ):
-    from fastapi.responses import StreamingResponse
-    from app.services.prediction_service import prediction_service
+    from fastapi.responses import RedirectResponse
 
-    return prediction_service.get_video_stream(session_id)
+    task = get_owned_video_task(db, session_id, current_user.username)
+    if not task:
+        raise HTTPException(status_code=404, detail="会话不存在或已过期")
+
+    if task.status in {"queued", "processing"}:
+        raise HTTPException(status_code=409, detail="视频仍在处理中")
+    if task.status == "failed":
+        raise HTTPException(status_code=500, detail=task.error_message or "视频处理失败")
+    if not task.output_url:
+        raise HTTPException(status_code=404, detail="输出视频不存在")
+
+    return RedirectResponse(task.output_url)
 
 
 @router.post("/video/{session_id}/stop")
 async def stop_video_detection(
     session_id: str,
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
 ):
-    from app.services.prediction_service import prediction_service
-    result = prediction_service.stop_video_session(session_id)
-    return result
+    task = get_owned_video_task(db, session_id, current_user.username)
+    if not task:
+        raise HTTPException(status_code=404, detail="会话不存在或已过期")
+
+    request_stop_video_task(db, session_id)
+    return {"status": 200, "message": "Stopping video processing", "code": 0}
 
 
 @router.post("/camera/start")
@@ -496,25 +559,60 @@ async def get_history(
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
     detection_type: str = Query(None),
+    type: str = Query(None),
+    date_from: str | None = Query(None, description="开始日期 YYYY-MM-DD"),
+    date_to: str | None = Query(None, description="结束日期 YYYY-MM-DD"),
+    keyword: str | None = Query(None, description="关键词（模型/crop）"),
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
     offset = (page - 1) * page_size
+    normalized_type = (detection_type or type or "").strip().lower() or None
+    keyword = (keyword or "").strip()
+    start_time_lower = f"{date_from} 00:00:00" if date_from else None
+    start_time_upper = f"{date_to} 23:59:59" if date_to else None
 
-    if detection_type == "image":
+    def _build_time_filters(column):
+        filters = []
+        if start_time_lower:
+            filters.append(column >= start_time_lower)
+        if start_time_upper:
+            filters.append(column <= start_time_upper)
+        return filters
+
+    def _build_img_filters():
+        filters = [ImgRecord.username == current_user.username, *_build_time_filters(ImgRecord.startTime)]
+        if keyword:
+            filters.append((ImgRecord.modelKey.like(f"%{keyword}%")) | (ImgRecord.cropType.like(f"%{keyword}%")))
+        return filters
+
+    def _build_video_filters():
+        filters = [VideoRecord.username == current_user.username, *_build_time_filters(VideoRecord.startTime)]
+        if keyword:
+            filters.append(VideoRecord.modelKey.like(f"%{keyword}%"))
+        return filters
+
+    def _build_camera_filters():
+        filters = [CameraRecord.username == current_user.username, *_build_time_filters(CameraRecord.startTime)]
+        if keyword:
+            filters.append(CameraRecord.modelKey.like(f"%{keyword}%"))
+        return filters
+
+    if normalized_type == "image":
         result = db.execute(
             select(ImgRecord)
-            .where(ImgRecord.username == current_user.username)
+            .where(*_build_img_filters())
             .order_by(desc(ImgRecord.id))
             .offset(offset)
             .limit(page_size)
         )
         items = result.scalars().all()
-        total = db.scalar(select(func.count()).select_from(ImgRecord).where(ImgRecord.username == current_user.username)) or 0
+        total = db.scalar(select(func.count()).select_from(ImgRecord).where(*_build_img_filters())) or 0
         records = [
             {
                 "id": item.id,
                 "type": "image",
+                "detection_type": "image",
                 "input": item.inputImg,
                 "output": item.outImg,
                 "label": item.label,
@@ -524,20 +622,21 @@ async def get_history(
             }
             for item in items
         ]
-    elif detection_type == "video":
+    elif normalized_type == "video":
         result = db.execute(
             select(VideoRecord)
-            .where(VideoRecord.username == current_user.username)
+            .where(*_build_video_filters())
             .order_by(desc(VideoRecord.id))
             .offset(offset)
             .limit(page_size)
         )
         items = result.scalars().all()
-        total = db.scalar(select(func.count()).select_from(VideoRecord).where(VideoRecord.username == current_user.username)) or 0
+        total = db.scalar(select(func.count()).select_from(VideoRecord).where(*_build_video_filters())) or 0
         records = [
             {
                 "id": item.id,
                 "type": "video",
+                "detection_type": "video",
                 "input": item.inputVideo,
                 "output": item.outVideo,
                 "track_stats": item.trackStats,
@@ -545,20 +644,21 @@ async def get_history(
             }
             for item in items
         ]
-    elif detection_type == "camera":
+    elif normalized_type == "camera":
         result = db.execute(
             select(CameraRecord)
-            .where(CameraRecord.username == current_user.username)
+            .where(*_build_camera_filters())
             .order_by(desc(CameraRecord.id))
             .offset(offset)
             .limit(page_size)
         )
         items = result.scalars().all()
-        total = db.scalar(select(func.count()).select_from(CameraRecord).where(CameraRecord.username == current_user.username)) or 0
+        total = db.scalar(select(func.count()).select_from(CameraRecord).where(*_build_camera_filters())) or 0
         records = [
             {
                 "id": item.id,
                 "type": "camera",
+                "detection_type": "camera",
                 "input": item.inputVideo,
                 "output": item.outVideo,
                 "track_stats": item.trackStats,
@@ -567,63 +667,63 @@ async def get_history(
             for item in items
         ]
     else:
-        img_result = db.execute(
-            select(ImgRecord)
-            .where(ImgRecord.username == current_user.username)
-            .order_by(desc(ImgRecord.id))
+        img_query = select(
+            ImgRecord.id.label("id"),
+            literal("image").label("detection_type"),
+            ImgRecord.inputImg.label("input"),
+            ImgRecord.outImg.label("output"),
+            ImgRecord.label.label("label"),
+            ImgRecord.confidence.label("confidence"),
+            ImgRecord.cropType.label("crop_type"),
+            literal(None).label("track_stats"),
+            ImgRecord.startTime.label("created_at"),
+        ).where(and_(*_build_img_filters()))
+        video_query = select(
+            VideoRecord.id.label("id"),
+            literal("video").label("detection_type"),
+            VideoRecord.inputVideo.label("input"),
+            VideoRecord.outVideo.label("output"),
+            literal(None).label("label"),
+            literal(None).label("confidence"),
+            literal(None).label("crop_type"),
+            VideoRecord.trackStats.label("track_stats"),
+            VideoRecord.startTime.label("created_at"),
+        ).where(and_(*_build_video_filters()))
+        camera_query = select(
+            CameraRecord.id.label("id"),
+            literal("camera").label("detection_type"),
+            CameraRecord.inputVideo.label("input"),
+            CameraRecord.outVideo.label("output"),
+            literal(None).label("label"),
+            literal(None).label("confidence"),
+            literal(None).label("crop_type"),
+            CameraRecord.trackStats.label("track_stats"),
+            CameraRecord.startTime.label("created_at"),
+        ).where(and_(*_build_camera_filters()))
+
+        union_subquery = union_all(img_query, video_query, camera_query).subquery()
+        total = db.scalar(select(func.count()).select_from(union_subquery)) or 0
+        rows = db.execute(
+            select(union_subquery)
+            .order_by(union_subquery.c.created_at.desc(), union_subquery.c.id.desc())
             .offset(offset)
             .limit(page_size)
-        )
-        video_result = db.execute(
-            select(VideoRecord)
-            .where(VideoRecord.username == current_user.username)
-            .order_by(desc(VideoRecord.id))
-            .offset(offset)
-            .limit(page_size)
-        )
-        camera_result = db.execute(
-            select(CameraRecord)
-            .where(CameraRecord.username == current_user.username)
-            .order_by(desc(CameraRecord.id))
-            .offset(offset)
-            .limit(page_size)
-        )
-
-        records = []
-        for item in img_result.scalars().all():
-            records.append({
-                "id": item.id,
-                "type": "image",
-                "input": item.inputImg,
-                "output": item.outImg,
-                "label": item.label,
-                "confidence": item.confidence,
-                "created_at": item.startTime
-            })
-        for item in video_result.scalars().all():
-            records.append({
-                "id": item.id,
-                "type": "video",
-                "input": item.inputVideo,
-                "output": item.outVideo,
-                "created_at": item.startTime
-            })
-        for item in camera_result.scalars().all():
-            records.append({
-                "id": item.id,
-                "type": "camera",
-                "input": item.inputVideo,
-                "output": item.outVideo,
-                "created_at": item.startTime
-            })
-
-        total = (
-            (db.scalar(select(func.count()).select_from(ImgRecord).where(ImgRecord.username == current_user.username)) or 0)
-            + (db.scalar(select(func.count()).select_from(VideoRecord).where(VideoRecord.username == current_user.username)) or 0)
-            + (db.scalar(select(func.count()).select_from(CameraRecord).where(CameraRecord.username == current_user.username)) or 0)
-        )
-
-    records.sort(key=lambda x: x.get("created_at", ""), reverse=True)
+        ).mappings().all()
+        records = [
+            {
+                "id": row["id"],
+                "type": row["detection_type"],
+                "detection_type": row["detection_type"],
+                "input": row["input"],
+                "output": row["output"],
+                "label": row["label"],
+                "confidence": row["confidence"],
+                "crop_type": row["crop_type"],
+                "track_stats": row["track_stats"],
+                "created_at": row["created_at"],
+            }
+            for row in rows
+        ]
 
     return {
         "items": records,

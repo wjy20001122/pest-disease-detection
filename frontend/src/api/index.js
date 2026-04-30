@@ -126,7 +126,9 @@ export const environmentApi = {
 export const knowledgeApi = {
   search: (params) => request.get('/knowledge/search', { params }),
   recent: (params) => request.get('/knowledge/recent', { params }),
-  detail: (id) => request.get(`/knowledge/${id}`)
+  detail: (id) => request.get(`/knowledge/${id}`),
+  shapes: () => request.get('/knowledge/shapes'),
+  colors: () => request.get('/knowledge/colors')
 }
 
 // 问答 API
@@ -154,7 +156,11 @@ export const adminApi = {
   notifications: (params) => request.get('/admin/notifications', { params }),
   broadcastNotification: (data) => request.post('/admin/notifications/broadcast', data),
   markAllNotificationsRead: (params) => request.put('/admin/notifications/read-all', null, { params }),
-  knowledge: (params) => request.get('/admin/knowledge', { params })
+  knowledge: (params) => request.get('/admin/knowledge', { params }),
+  queueMetrics: () => request.get('/admin/queue/metrics'),
+  configs: () => request.get('/admin/configs'),
+  updateConfigs: (values) => request.put('/admin/configs', { values }),
+  permissionAudit: (params) => request.get('/admin/audit/permissions', { params })
 }
 
 // 记录相关 API (与现有Fastapi兼容)

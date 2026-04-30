@@ -76,7 +76,8 @@ class DeepSeekService:
         self,
         question: str,
         context: str = "",
-        sources: list = None
+        sources: list = None,
+        selection_context: Dict[str, Any] | None = None,
     ) -> str:
         """结合知识库上下文进行问答（RAG）
 
@@ -104,8 +105,21 @@ class DeepSeekService:
 - 防治方法：农业防治、化学防治、生物防治等"""
 
         user_content = question
+        selection_text = ""
+        if selection_context:
+            crop_type = (selection_context.get("crop_type") or "").strip()
+            category = (selection_context.get("category") or "").strip()
+            if crop_type or category:
+                selection_text = (
+                    "【用户硬约束】\n"
+                    f"- 作物范围：{crop_type or '未指定'}\n"
+                    f"- 类别范围：{category or '未指定'}\n"
+                    "- 你必须严格在该范围内回答，不能越界给结论；若证据冲突请明确提示“与用户选择不一致”。\n\n"
+                )
         if context:
-            user_content = f"【知识库参考信息】\n{context}\n\n【用户问题】\n{question}"
+            user_content = f"{selection_text}【知识库参考信息】\n{context}\n\n【用户问题】\n{question}"
+        elif selection_text:
+            user_content = f"{selection_text}【用户问题】\n{question}"
 
         messages = [
             {"role": "system", "content": system_prompt},
@@ -205,7 +219,11 @@ class DeepSeekService:
 
         return await self.chat(messages, temperature=0.6)
 
-    async def analyze_image_url(self, image_url: str) -> Dict[str, Any]:
+    async def analyze_image_url(
+        self,
+        image_url: str,
+        selection_context: Dict[str, Any] | None = None,
+    ) -> Dict[str, Any]:
         """分析图像URL，识别病虫害
 
         Args:
@@ -219,6 +237,7 @@ class DeepSeekService:
 输出格式（必须返回JSON）：
 {
     "crop_type": "作物类型",
+    "category": "病害/虫害",
     "has_pest": true/false,
     "no_pest_confidence": 0.0-1.0,
     "diseases": [
@@ -235,9 +254,18 @@ class DeepSeekService:
     "analysis_notes": "分析备注"
 }"""
 
+        selection_text = ""
+        if selection_context:
+            crop_type = (selection_context.get("crop_type") or "").strip()
+            category = (selection_context.get("category") or "").strip()
+            if crop_type or category:
+                selection_text = (
+                    f"用户选择约束：作物={crop_type or '未指定'}，类别={category or '未指定'}。\n"
+                    "请严格遵守此范围，不要输出越界病虫害；若图像特征冲突，请在analysis_notes中指出“与用户选择不一致”。\n"
+                )
         messages = [
             {"role": "system", "content": system_prompt},
-            {"role": "user", "content": f"请分析这张图像：{image_url}"}
+            {"role": "user", "content": f"{selection_text}请分析这张图像：{image_url}"}
         ]
 
         result = await self.chat_json(messages, temperature=0.3)
@@ -246,7 +274,8 @@ class DeepSeekService:
     async def analyze_with_detection_context(
         self,
         image_url: str,
-        detection_context: Dict[str, Any]
+        detection_context: Dict[str, Any],
+        selection_context: Dict[str, Any] | None = None,
     ) -> Dict[str, Any]:
         """基于本地检测结构结果生成AI分析建议（不改本地判定）"""
         system_prompt = """你是农业病虫害诊断专家。请基于“本地模型检测结果”和图像URL生成辅助分析建议。
@@ -259,6 +288,7 @@ class DeepSeekService:
 输出格式：
 {
     "crop_type": "作物类型",
+    "category": "病害/虫害",
     "has_pest": true,
     "no_pest_confidence": 0.0,
     "diseases": [
@@ -278,6 +308,7 @@ class DeepSeekService:
         payload = {
             "image_url": image_url,
             "local_detection_context": detection_context,
+            "selection_context": selection_context or {},
         }
         messages = [
             {"role": "system", "content": system_prompt},

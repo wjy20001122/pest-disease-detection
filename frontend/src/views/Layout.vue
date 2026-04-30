@@ -1,125 +1,223 @@
 <template>
-  <div class="layout">
-    <aside class="sidebar" :class="{ collapsed }">
-      <div class="logo">
-        <span class="logo-icon">🌾</span>
-        <span class="logo-text" v-show="!collapsed">病虫害检测</span>
-      </div>
-      
-      <nav class="nav">
-        <div class="nav-section-title" v-show="!collapsed">业务功能</div>
-        <router-link to="/" class="nav-item" exact-active-class="active">
-          <span class="icon">🏠</span>
-          <span class="text" v-show="!collapsed">首页</span>
-        </router-link>
-        <router-link to="/detect" class="nav-item" active-class="active">
-          <span class="icon">🔍</span>
-          <span class="text" v-show="!collapsed">检测中心</span>
-        </router-link>
-        <router-link to="/history" class="nav-item" active-class="active">
-          <span class="icon">📋</span>
-          <span class="text" v-show="!collapsed">检测历史</span>
-        </router-link>
-        <router-link to="/tracking" class="nav-item" active-class="active">
-          <span class="icon">📍</span>
-          <span class="text" v-show="!collapsed">虫害跟踪</span>
-        </router-link>
-        <router-link to="/knowledge" class="nav-item" active-class="active">
-          <span class="icon">📚</span>
-          <span class="text" v-show="!collapsed">知识库</span>
-        </router-link>
-        <router-link to="/qna" class="nav-item" active-class="active">
-          <span class="icon">💬</span>
-          <span class="text" v-show="!collapsed">智能问答</span>
-        </router-link>
-        <router-link to="/stats" class="nav-item" active-class="active">
-          <span class="icon">📈</span>
-          <span class="text" v-show="!collapsed">数据统计</span>
-        </router-link>
-        <router-link to="/settings" class="nav-item" active-class="active">
-          <span class="icon">⚙️</span>
-          <span class="text" v-show="!collapsed">设置</span>
-        </router-link>
-        <template v-if="userStore.isAdmin">
-          <div class="nav-divider"></div>
-          <div class="nav-section-title" v-show="!collapsed">管理工作区</div>
-          <router-link to="/admin/overview" class="nav-item" active-class="active">
-            <span class="icon">📊</span>
-            <span class="text" v-show="!collapsed">管理员概览</span>
-          </router-link>
-          <router-link to="/admin/users" class="nav-item" active-class="active">
-            <span class="icon">👥</span>
-            <span class="text" v-show="!collapsed">用户管理</span>
-          </router-link>
-          <router-link to="/admin/notifications" class="nav-item" active-class="active">
-            <span class="icon">📨</span>
-            <span class="text" v-show="!collapsed">通知治理</span>
-          </router-link>
-          <router-link to="/admin/models" class="nav-item" active-class="active">
-            <span class="icon">🧠</span>
-            <span class="text" v-show="!collapsed">模型运维</span>
-          </router-link>
-        </template>
-      </nav>
-      
-      <div class="sidebar-footer">
-        <button class="btn-ghost" @click="collapsed = !collapsed">{{ collapsed ? '→' : '←' }}</button>
-        <button class="btn-ghost" @click="handleLogout">🚪</button>
-      </div>
-    </aside>
-    
-    <div class="main">
-      <header class="header">
-        <h1 class="page-title">{{ pageTitle }}</h1>
-        <div class="header-right">
-          <router-link to="/notifications" class="icon-btn">
-            🔔<span v-if="unreadCount" class="badge">{{ unreadCount > 99 ? '99+' : unreadCount }}</span>
-          </router-link>
-          <span class="username">{{ userStore.user?.username }}</span>
+  <AppShell :collapsed="collapsed" :mobile="isMobile" :mobile-open="mobileMenuOpen">
+    <template #sidebar>
+      <div class="sidebar">
+        <div class="logo-row">
+          <div class="logo-mark">CD</div>
+          <div v-if="!collapsed || isMobile" class="logo-text">
+            <strong>Corn Detect</strong>
+            <span>智能病虫害工作台</span>
+          </div>
         </div>
-      </header>
-      
-      <main class="content">
-        <router-view />
-      </main>
-    </div>
-  </div>
+
+        <nav class="nav-groups">
+          <section v-for="group in groupedMenus" :key="group.key" class="group">
+            <div v-if="!collapsed || isMobile" class="group-title">{{ group.label }}</div>
+            <router-link
+              v-for="item in group.items"
+              :key="item.name"
+              :to="item.path"
+              class="nav-item"
+              active-class="active"
+              @click="handleNavClick"
+            >
+              <component :is="item.icon" class="item-icon" />
+              <span v-if="!collapsed || isMobile">{{ item.title }}</span>
+            </router-link>
+          </section>
+        </nav>
+
+        <div class="sidebar-footer">
+          <el-button text @click="toggleCollapse">
+            <el-icon><component :is="collapsed ? Expand : Fold" /></el-icon>
+            <span v-if="!collapsed || isMobile">折叠导航</span>
+          </el-button>
+          <el-button text type="danger" @click="handleLogout">
+            <el-icon><SwitchButton /></el-icon>
+            <span v-if="!collapsed || isMobile">退出登录</span>
+          </el-button>
+        </div>
+      </div>
+    </template>
+
+    <template #topbar>
+      <div class="topbar">
+        <div class="left">
+          <el-button v-if="isMobile" text @click="mobileMenuOpen = !mobileMenuOpen">
+            <el-icon><Menu /></el-icon>
+          </el-button>
+          <div class="route-meta">
+            <h1>{{ pageTitle }}</h1>
+            <el-breadcrumb separator="/" class="breadcrumb">
+              <el-breadcrumb-item v-for="item in breadcrumbs" :key="item.path || item.title">
+                <span>{{ item.title }}</span>
+              </el-breadcrumb-item>
+            </el-breadcrumb>
+          </div>
+        </div>
+
+        <div class="right">
+          <el-input
+            class="global-search"
+            placeholder="搜索（即将支持）"
+            :prefix-icon="Search"
+            disabled
+          />
+          <el-button text @click="toggleTheme">
+            <el-icon><component :is="theme === 'light' ? Moon : Sunny" /></el-icon>
+          </el-button>
+          <router-link to="/notifications" class="notify-btn" @click="mobileMenuOpen = false">
+            <el-icon><Bell /></el-icon>
+            <span v-if="unreadCount > 0" class="badge">{{ unreadCount > 99 ? '99+' : unreadCount }}</span>
+          </router-link>
+          <el-dropdown @command="handleUserCommand">
+            <span class="user-trigger">
+              {{ userStore.user?.username || '用户' }}
+              <el-icon><ArrowDown /></el-icon>
+            </span>
+            <template #dropdown>
+              <el-dropdown-menu>
+                <el-dropdown-item command="settings">个人设置</el-dropdown-item>
+                <el-dropdown-item command="logout" divided>退出登录</el-dropdown-item>
+              </el-dropdown-menu>
+            </template>
+          </el-dropdown>
+        </div>
+      </div>
+    </template>
+
+    <router-view />
+  </AppShell>
+
+  <div v-if="isMobile && mobileMenuOpen" class="mobile-mask" @click="mobileMenuOpen = false" />
 </template>
 
 <script setup>
-import { ref, computed, onMounted } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useUserStore } from '@/stores/user'
 import { notificationApi } from '@/api'
+import AppShell from '@/components/ui/AppShell.vue'
+import {
+  Aim,
+  ArrowDown,
+  Bell,
+  ChatDotSquare,
+  Cpu,
+  DataLine,
+  Document,
+  Expand,
+  Fold,
+  House,
+  Location,
+  Menu,
+  MessageBox,
+  Moon,
+  Odometer,
+  Reading,
+  Search,
+  Setting,
+  Sunny,
+  SwitchButton,
+  Tools,
+  UserFilled,
+  Warning
+} from '@element-plus/icons-vue'
 
-const route = useRoute()
 const router = useRouter()
+const route = useRoute()
 const userStore = useUserStore()
+
 const collapsed = ref(false)
 const unreadCount = ref(0)
+const theme = ref(localStorage.getItem('ui_theme') || 'light')
+const isMobile = ref(window.innerWidth < 768)
+const mobileMenuOpen = ref(false)
 
-const titles = {
-  Home: '首页概览',
-  Detect: '检测中心',
-  History: '检测历史',
-  Tracking: '虫害跟踪',
-  Knowledge: '病害知识库',
-  QnA: '智能问答',
-  Stats: '数据统计',
-  Notifications: '消息通知',
-  Settings: '个人设置',
-  AdminOverview: '管理员概览',
-  AdminUsers: '用户管理',
-  AdminNotifications: '通知治理',
-  AdminModels: '模型运维'
+const iconMap = {
+  House,
+  Aim,
+  Document,
+  Location,
+  Reading,
+  ChatDotSquare,
+  Bell,
+  DataLine,
+  Setting,
+  Odometer,
+  UserFilled,
+  MessageBox,
+  Cpu,
+  Tools,
+  Warning
 }
-const pageTitle = computed(() => titles[route.name] || '病虫害检测系统')
 
-async function fetchUnread() {
-  try {
-    const res = await notificationApi.list({ is_read: false, page_size: 100 })
-    unreadCount.value = res.unread_count || 0
-  } catch {}
+const groupLabels = {
+  workspace: '业务功能',
+  admin: '管理工作区'
+}
+
+const groupOrder = ['workspace', 'admin']
+
+const menuItems = computed(() => {
+  const routes = router.getRoutes()
+    .filter((item) => item.name && item.meta?.group)
+    .map((item) => ({
+      name: item.name,
+      path: item.path,
+      title: item.meta.title || item.name,
+      group: item.meta.group,
+      requiresAdmin: !!item.meta.requiresAdmin,
+      icon: iconMap[item.meta.icon] || Document
+    }))
+
+  return routes.filter((item) => (item.requiresAdmin ? userStore.isAdmin : true))
+})
+
+const groupedMenus = computed(() => groupOrder
+  .map((groupKey) => ({
+    key: groupKey,
+    label: groupLabels[groupKey] || groupKey,
+    items: menuItems.value.filter((item) => item.group === groupKey)
+  }))
+  .filter((group) => group.items.length > 0))
+
+const pageTitle = computed(() => route.meta?.title || '病虫害检测系统')
+
+const breadcrumbs = computed(() => route.matched
+  .filter((item) => item.meta?.title && item.path !== '/')
+  .map((item) => ({
+    title: item.meta.title,
+    path: item.path
+  })))
+
+function applyTheme(value) {
+  document.documentElement.setAttribute('data-theme', value)
+  localStorage.setItem('ui_theme', value)
+}
+
+function toggleTheme() {
+  theme.value = theme.value === 'light' ? 'dark' : 'light'
+  applyTheme(theme.value)
+}
+
+function toggleCollapse() {
+  if (isMobile.value) return
+  collapsed.value = !collapsed.value
+}
+
+function handleNavClick() {
+  if (isMobile.value) {
+    mobileMenuOpen.value = false
+  }
+}
+
+function handleUserCommand(command) {
+  if (command === 'settings') {
+    router.push('/settings')
+    return
+  }
+  handleLogout()
 }
 
 function handleLogout() {
@@ -127,58 +225,237 @@ function handleLogout() {
   router.push('/login')
 }
 
-onMounted(() => {
-  if (!userStore.user) userStore.fetchUser()
-  fetchUnread()
+function handleResize() {
+  isMobile.value = window.innerWidth < 768
+  if (!isMobile.value) {
+    mobileMenuOpen.value = false
+  }
+}
+
+async function fetchUnread() {
+  try {
+    const res = await notificationApi.list({ is_read: false, page_size: 1 })
+    unreadCount.value = res.unread_count || 0
+  } catch {
+    unreadCount.value = 0
+  }
+}
+
+onMounted(async () => {
+  applyTheme(theme.value)
+  if (!userStore.user) {
+    await userStore.fetchUser()
+  }
+  await fetchUnread()
+  window.addEventListener('resize', handleResize)
+})
+
+onBeforeUnmount(() => {
+  window.removeEventListener('resize', handleResize)
 })
 </script>
 
-<style lang="scss" scoped>
-.layout { display: flex; min-height: 100vh; }
+<style scoped lang="scss">
 .sidebar {
-  width: 220px; background: var(--bg-primary); border-right: 1px solid var(--border-light);
-  display: flex; flex-direction: column; transition: width 0.3s;
-  &.collapsed { width: 64px; }
-  @media (max-width: 768px) {
-    position: fixed; left: -220px; z-index: 1000; height: 100vh;
-    &.open { left: 0; }
-  }
+  display: flex;
+  flex-direction: column;
+  height: 100%;
 }
-.logo { display: flex; align-items: center; gap: 12px; padding: 20px; border-bottom: 1px solid var(--border-light); }
-.logo-icon { font-size: 28px; }
-.logo-text { font-size: 16px; font-weight: 600; }
-.nav { flex: 1; padding: 16px 12px; }
-.nav-section-title {
-  padding: 8px 12px;
-  font-size: 12px;
-  color: var(--text-muted);
-  letter-spacing: 0;
-}
-.nav-item {
-  display: flex; align-items: center; gap: 12px; padding: 12px; border-radius: var(--radius-md);
-  color: var(--text-secondary); text-decoration: none; margin-bottom: 4px;
-  &:hover { background: var(--bg-secondary); color: var(--text-primary); }
-  &.active { background: var(--primary); color: white; }
-  @media (max-width: 768px) {
-    padding: 10px;
-  }
-}
-.icon { font-size: 18px; }
-.nav-divider { height: 1px; background: var(--border-light); margin: 16px 0; }
-.sidebar-footer { padding: 16px; display: flex; gap: 8px; border-top: 1px solid var(--border-light); }
-.btn-ghost { flex: 1; padding: 10px; border: none; background: transparent; border-radius: var(--radius-md); cursor: pointer; &:hover { background: var(--bg-secondary); } }
-.main { flex: 1; display: flex; flex-direction: column; min-width: 0; }
-.header { display: flex; align-items: center; justify-content: space-between; padding: 16px 24px; background: var(--bg-primary); border-bottom: 1px solid var(--border-light); }
-.page-title { font-size: 18px; font-weight: 600; }
-.header-right { display: flex; align-items: center; gap: 16px; }
-.icon-btn { position: relative; display: flex; align-items: center; justify-content: center; width: 40px; height: 40px; border-radius: var(--radius-md); background: var(--bg-secondary); font-size: 18px; }
-.badge { position: absolute; top: 2px; right: 2px; min-width: 18px; height: 18px; padding: 0 5px; background: var(--error); color: white; font-size: 11px; border-radius: 9px; display: flex; align-items: center; justify-content: center; }
-.username { font-size: 14px; color: var(--text-primary); font-weight: 500; }
-.content { flex: 1; padding: 24px; overflow-y: auto; }
 
-@media (max-width: 768px) {
-  .content { padding: 16px; }
-  .page-title { font-size: 16px; }
-  .header { padding: 12px 16px; }
+.logo-row {
+  height: var(--topbar-height);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0 12px;
+  border-bottom: 1px solid var(--border-light);
+}
+
+.logo-mark {
+  width: 34px;
+  height: 34px;
+  border-radius: 10px;
+  background: linear-gradient(120deg, var(--primary), var(--primary-light));
+  color: #fff;
+  font-size: 12px;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.logo-text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.logo-text strong {
+  font-size: 13px;
+}
+
+.logo-text span {
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
+.nav-groups {
+  flex: 1;
+  overflow: auto;
+  padding: 10px 8px;
+}
+
+.group + .group {
+  margin-top: 12px;
+}
+
+.group-title {
+  margin: 0 8px 6px;
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
+.nav-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 10px;
+  border-radius: 10px;
+  color: var(--text-secondary);
+  font-size: 13px;
+  transition: all 0.15s ease;
+}
+
+.nav-item:hover {
+  color: var(--text-primary);
+  background: var(--surface-2);
+}
+
+.nav-item.active {
+  color: #fff;
+  background: linear-gradient(120deg, var(--primary), var(--primary-light));
+}
+
+.item-icon {
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+}
+
+.sidebar-footer {
+  padding: 8px;
+  border-top: 1px solid var(--border-light);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.sidebar-footer :deep(.el-button) {
+  justify-content: flex-start;
+}
+
+.topbar {
+  height: 100%;
+  padding: 0 12px 0 8px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.left,
+.right {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.route-meta {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.route-meta h1 {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.breadcrumb {
+  font-size: 12px;
+}
+
+.global-search {
+  width: 200px;
+}
+
+.notify-btn {
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-secondary);
+  border: 1px solid var(--border-light);
+  position: relative;
+}
+
+.notify-btn:hover {
+  color: var(--text-primary);
+  background: var(--surface-2);
+}
+
+.badge {
+  position: absolute;
+  top: -5px;
+  right: -5px;
+  min-width: 16px;
+  padding: 0 4px;
+  height: 16px;
+  border-radius: 8px;
+  color: #fff;
+  font-size: 10px;
+  background: var(--danger-1);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.user-trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px;
+  border-radius: 8px;
+  cursor: pointer;
+  color: var(--text-secondary);
+}
+
+.user-trigger:hover {
+  background: var(--surface-2);
+}
+
+.mobile-mask {
+  position: fixed;
+  inset: 0;
+  z-index: 30;
+  background: rgba(15, 23, 42, 0.36);
+}
+
+@media (max-width: 767px) {
+  .global-search {
+    display: none;
+  }
+
+  .route-meta h1 {
+    font-size: 14px;
+  }
+
+  .breadcrumb {
+    display: none;
+  }
 }
 </style>

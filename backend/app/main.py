@@ -10,6 +10,7 @@ from app.api.routers import files, prediction, records, system, users
 from app.api.routers import auth, detection, tracking, knowledge, qna, notifications, admin, environment
 from app.api.api_keys import router as api_keys_router
 from app.core.config import settings
+from app.db.bootstrap import bootstrap_runtime_data
 from app.db.session import Base, engine
 from app.services.prediction_service import prediction_service
 from app.services.socket_manager import socket_manager
@@ -48,6 +49,7 @@ def create_fastapi_app() -> FastAPI:
     @app.on_event("startup")
     async def startup() -> None:
         Base.metadata.create_all(bind=engine)
+        bootstrap_runtime_data()
         socket_manager.attach_loop(asyncio.get_running_loop())
         prediction_service.start()
 

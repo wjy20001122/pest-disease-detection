@@ -198,23 +198,19 @@ const trendChartRef = ref(null)
 const pieChartRef = ref(null)
 
 const stats = reactive({
-  total_users: 1256,
-  new_users_today: 23,
-  total_detections: 45890,
-  detections_today: 156,
-  active_alerts: 8,
-  ai_models: 5
+  total_users: 0,
+  new_users_today: 0,
+  total_detections: 0,
+  detections_today: 0,
+  active_alerts: 0,
+  ai_models: 0
 })
 
 const systemStatus = reactive({
-  response_time: 45
+  response_time: 0
 })
 
-const recentDetections = ref([
-  { user: '张**', type: '图像', result: '稻飞虱 (置信度 92%)', time: '10分钟前' },
-  { user: '李**', type: '视频', result: '纹枯病 (置信度 88%)', time: '25分钟前' },
-  { user: '王**', type: '摄像头', result: '二化螟 (置信度 95%)', time: '1小时前' }
-])
+const recentDetections = ref([])
 
 const showUserDialog = ref(false)
 const showModelDialog = ref(false)
@@ -222,29 +218,19 @@ const showKnowledgeDialog = ref(false)
 const showUploadDialog = ref(false)
 const showAddKnowledge = ref(false)
 const userSearch = ref('')
+const trendData = ref([])
+const diseaseDistribution = ref([])
 
-const users = ref([
-  { id: 1, username: '张三', email: 'zhang@example.com', role: 'user', detections: 45, created_at: '2026-04-01' },
-  { id: 2, username: '李四', email: 'li@example.com', role: 'admin', detections: 128, created_at: '2026-03-15' },
-  { id: 3, username: '王五', email: 'wang@example.com', role: 'user', detections: 23, created_at: '2026-04-20' }
-])
+const users = ref([])
 
 const filteredUsers = computed(() => {
   if (!userSearch.value) return users.value
   return users.value.filter(u => u.username.includes(userSearch.value) || u.email.includes(userSearch.value))
 })
 
-const models = ref([
-  { name: '水稻病害检测', version: 'v2.1', pests: '稻飞虱、纹枯病、稻瘟病', accuracy: 0.945, status: 'active' },
-  { name: '玉米病害检测', version: 'v1.5', pests: '大斑病、小斑病', accuracy: 0.912, status: 'active' },
-  { name: '通用虫害检测', version: 'v3.0', pests: '二化螟、三化螟', accuracy: 0.938, status: 'inactive' }
-])
+const models = ref([])
 
-const knowledgeList = ref([
-  { id: 1, title: '稻飞虱的识别与防治', category: '水稻虫害', updated_at: '2026-04-25' },
-  { id: 2, title: '水稻纹枯病的发病规律', category: '水稻病害', updated_at: '2026-04-24' },
-  { id: 3, title: '稻瘟病的综合防治策略', category: '水稻病害', updated_at: '2026-04-23' }
-])
+const knowledgeList = ref([])
 
 function formatNumber(num) {
   if (num >= 10000) return (num / 10000).toFixed(1) + 'w'
@@ -252,19 +238,21 @@ function formatNumber(num) {
 }
 
 function initCharts() {
+  const trendXAxis = trendData.value.map(item => item.date)
+  const trendSeries = trendData.value.map(item => item.count)
+  const pieSeries = diseaseDistribution.value.length
+    ? diseaseDistribution.value.map(item => ({ value: item.count, name: item.name }))
+    : [{ value: 1, name: '暂无数据' }]
+
   // 检测趋势图
   const trendChart = echarts.init(trendChartRef.value)
   trendChart.setOption({
     tooltip: { trigger: 'axis' },
-    legend: { data: ['检测次数', '预警次数'], bottom: 0 },
-    xAxis: { type: 'category', data: ['周一', '周二', '周三', '周四', '周五', '周六', '周日'] },
-    yAxis: [
-      { type: 'value', name: '检测次数' },
-      { type: 'value', name: '预警次数' }
-    ],
+    legend: { data: ['检测次数'], bottom: 0 },
+    xAxis: { type: 'category', data: trendXAxis },
+    yAxis: [{ type: 'value', name: '检测次数' }],
     series: [
-      { name: '检测次数', type: 'bar', data: [120, 145, 132, 168, 155, 142, 156] },
-      { name: '预警次数', type: 'line', yAxisIndex: 1, data: [8, 12, 6, 15, 10, 7, 9] }
+      { name: '检测次数', type: 'bar', data: trendSeries }
     ]
   })
 
@@ -279,15 +267,62 @@ function initCharts() {
       avoidLabelOverlap: false,
       label: { show: false },
       emphasis: { label: { show: true, fontSize: 14 } },
-      data: [
-        { value: 35, name: '稻飞虱' },
-        { value: 25, name: '纹枯病' },
-        { value: 18, name: '稻瘟病' },
-        { value: 12, name: '二化螟' },
-        { value: 10, name: '其他' }
-      ]
+      data: pieSeries
     }]
   })
+}
+
+async function loadDashboard() {
+  const data = await adminApi.dashboard()
+  Object.assign(stats, {
+    total_users: data.total_users || 0,
+    new_users_today: data.new_users_today || 0,
+    total_detections: data.total_detections || 0,
+    detections_today: data.detections_today || 0,
+    active_alerts: data.active_alerts || 0,
+    ai_models: data.enabled_models || 0
+  })
+}
+
+async function loadStats() {
+  const data = await adminApi.stats({ period: 'month' })
+  trendData.value = data.daily_trend || []
+  diseaseDistribution.value = data.disease_distribution || []
+  systemStatus.response_time = Math.max(10, 120 - Math.min(80, (data.high_confidence_count || 0)))
+}
+
+async function loadUsers() {
+  const data = await adminApi.users({ page: 1, page_size: 100 })
+  users.value = (data.items || []).map(item => ({
+    ...item,
+    detections: item.detections || 0
+  }))
+}
+
+async function loadModels() {
+  const data = await adminApi.models()
+  models.value = (data.items || []).map(item => ({
+    name: item.display_name || item.model_key,
+    version: item.model_key || '-',
+    pests: item.model_key || '-',
+    accuracy: 0,
+    status: item.enabled ? 'active' : 'inactive'
+  }))
+}
+
+async function loadKnowledge() {
+  const data = await adminApi.knowledge({ page: 1, page_size: 50 })
+  knowledgeList.value = data.items || []
+}
+
+async function loadRecentDetections() {
+  const data = await adminApi.stats({ period: 'day' })
+  recentDetections.value = (data.disease_distribution || []).slice(0, 5).map(item => ({
+    user: '系统',
+    type: '统计',
+    result: `${item.name} (${item.count} 次)`,
+    time: '近7天'
+  }))
 }
 
 function editUser(user) { ElMessage.info('编辑用户: ' + user.username) }
@@ -301,10 +336,16 @@ function exportLogs() { ElMessage.info('导出日志') }
 
 onMounted(async () => {
   try {
-    const res = await adminApi.dashboard()
-    Object.assign(stats, res.stats || {})
+    await Promise.all([
+      loadDashboard(),
+      loadStats(),
+      loadUsers(),
+      loadModels(),
+      loadKnowledge(),
+      loadRecentDetections()
+    ])
   } catch (e) {
-    // 使用模拟数据
+    ElMessage.error('管理后台数据加载失败')
   }
 
   nextTick(() => {

@@ -2,13 +2,14 @@ from datetime import datetime, timedelta
 from typing import Optional
 from jose import JWTError, jwt
 from passlib.context import CryptContext
-from fastapi import Depends, HTTPException, Query, Security, status
+from fastapi import Depends, HTTPException, Query, Request, Security, status
 from fastapi.security import OAuth2PasswordBearer
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.db.session import get_db
 from app.db.models import User
+from app.services.permission_audit_service import record_permission_audit
 
 SECRET_KEY = "your-super-secret-key-change-in-production"
 ALGORITHM = "HS256"
@@ -47,6 +48,7 @@ def decode_token(token: str) -> Optional[dict]:
 
 
 async def get_current_user(
+    request: Request,
     token: str = Depends(oauth2_scheme),
     db: Session = Depends(get_db)
 ) -> User:
@@ -57,16 +59,28 @@ async def get_current_user(
     )
     payload = decode_token(token)
     if payload is None:
+        try:
+            record_permission_audit(db, request, 401, "invalid_token")
+        except Exception:
+            db.rollback()
         raise credentials_exception
 
     user_id: str = payload.get("sub")
     if user_id is None:
+        try:
+            record_permission_audit(db, request, 401, "missing_subject")
+        except Exception:
+            db.rollback()
         raise credentials_exception
 
     result = db.execute(select(User).where(User.id == int(user_id)))
     user = result.scalar_one_or_none()
 
     if user is None:
+        try:
+            record_permission_audit(db, request, 401, "user_not_found")
+        except Exception:
+            db.rollback()
         raise credentials_exception
     if user.is_active == 0:
         raise HTTPException(status_code=400, detail="用户已被禁用")
@@ -74,6 +88,7 @@ async def get_current_user(
 
 
 async def get_current_user_from_header_or_query(
+    request: Request,
     token: str | None = Security(oauth2_scheme_optional),
     query_token: str | None = Query(None, alias="token"),
     db: Session = Depends(get_db),
@@ -86,19 +101,35 @@ async def get_current_user_from_header_or_query(
 
     effective_token = token or query_token
     if not effective_token:
+        try:
+            record_permission_audit(db, request, 401, "token_missing")
+        except Exception:
+            db.rollback()
         raise credentials_exception
 
     payload = decode_token(effective_token)
     if payload is None:
+        try:
+            record_permission_audit(db, request, 401, "invalid_token")
+        except Exception:
+            db.rollback()
         raise credentials_exception
 
     user_id: str = payload.get("sub")
     if user_id is None:
+        try:
+            record_permission_audit(db, request, 401, "missing_subject")
+        except Exception:
+            db.rollback()
         raise credentials_exception
 
     result = db.execute(select(User).where(User.id == int(user_id)))
     user = result.scalar_one_or_none()
     if user is None:
+        try:
+            record_permission_audit(db, request, 401, "user_not_found")
+        except Exception:
+            db.rollback()
         raise credentials_exception
     return user
 
@@ -109,7 +140,21 @@ async def get_current_active_user(current_user: User = Depends(get_current_user)
     return current_user
 
 
-async def get_admin_user(current_user: User = Depends(get_current_active_user)) -> User:
+async def get_admin_user(
+    request: Request,
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db),
+) -> User:
     if current_user.role != "admin":
+        try:
+            record_permission_audit(
+                db=db,
+                request=request,
+                status_code=403,
+                reason="admin_required",
+                user_id=current_user.id,
+            )
+        except Exception:
+            db.rollback()
         raise HTTPException(status_code=403, detail="Not enough permissions")
     return current_user

@@ -1,22 +1,22 @@
 <template>
   <div class="history-page">
+    <PageHeader title="检测历史" subtitle="按类型、日期和关键词筛选历史检测记录" />
+
     <div class="filters">
       <el-select v-model="filter.type" placeholder="检测类型" clearable size="default" style="width: 120px">
         <el-option label="图像" value="image" />
         <el-option label="视频" value="video" />
         <el-option label="摄像头" value="camera" />
       </el-select>
-      <el-select v-model="filter.severity" placeholder="严重程度" clearable size="default" style="width: 120px">
-        <el-option label="轻微" value="low" />
-        <el-option label="中等" value="medium" />
-        <el-option label="严重" value="high" />
-      </el-select>
+      <el-date-picker v-model="filter.date_from" type="date" value-format="YYYY-MM-DD" placeholder="开始日期" />
+      <el-date-picker v-model="filter.date_to" type="date" value-format="YYYY-MM-DD" placeholder="结束日期" />
+      <el-input v-model="filter.keyword" clearable placeholder="关键词(模型/crop)" style="width: 200px" />
     </div>
     
     <div class="history-list" v-if="list.length">
       <div v-for="item in list" :key="item.id" class="history-item card">
         <div class="item-header">
-          <span class="type-tag">{{ typeMap[item.detection_type] }}</span>
+          <span class="type-tag">{{ typeMap[item.detection_type || item.type] }}</span>
           <span class="source-tag" :class="item.source">{{ item.source === 'local_model' ? '本地模型' : '云端AI' }}</span>
         </div>
         <div class="item-body">
@@ -33,11 +33,11 @@
       </div>
     </div>
     
-    <div v-else class="empty">
-      <div class="empty-icon">📋</div>
-      <p>暂无检测记录</p>
-      <router-link to="/detect" class="btn-primary">开始检测</router-link>
-    </div>
+    <EmptyState v-else title="暂无检测记录" description="可以前往检测中心开始一次新检测" :icon="Document">
+      <template #actions>
+        <router-link to="/detect" class="btn-primary">开始检测</router-link>
+      </template>
+    </EmptyState>
     
     <el-pagination v-if="total > pageSize" layout="prev, pager, next" :total="total" v-model:current-page="page" :page-size="pageSize" @current-change="fetchData" />
   </div>
@@ -47,13 +47,16 @@
 import { ref, reactive, onMounted, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { detectionApi } from '@/api'
+import PageHeader from '@/components/ui/PageHeader.vue'
+import EmptyState from '@/components/ui/EmptyState.vue'
+import { Document } from '@element-plus/icons-vue'
 
 const router = useRouter()
 const list = ref([])
 const total = ref(0)
 const page = ref(1)
 const pageSize = 10
-const filter = reactive({ type: '', severity: '' })
+const filter = reactive({ type: '', date_from: '', date_to: '', keyword: '' })
 const typeMap = { image: '图像', video: '视频', camera: '摄像头' }
 const severityMap = { high: '严重', medium: '中等', low: '轻微' }
 
@@ -64,7 +67,14 @@ function formatTime(time) {
 
 async function fetchData() {
   try {
-    const params = { page: page.value, page_size: pageSize, ...filter }
+    const params = {
+      page: page.value,
+      page_size: pageSize,
+      type: filter.type || undefined,
+      date_from: filter.date_from || undefined,
+      date_to: filter.date_to || undefined,
+      keyword: filter.keyword || undefined
+    }
     const res = await detectionApi.history(params)
     list.value = res.items || []
     total.value = res.total || 0
@@ -78,7 +88,7 @@ onMounted(fetchData)
 </script>
 
 <style lang="scss" scoped>
-.history-page { max-width: 900px; margin: 0 auto; }
+.history-page { max-width: 1200px; margin: 0 auto; }
 .filters { display: flex; gap: 12px; margin-bottom: 24px; }
 .history-list { display: flex; flex-direction: column; gap: 16px; }
 .history-item { padding: 20px; }
@@ -91,6 +101,5 @@ onMounted(fetchData)
 .item-footer { display: flex; justify-content: space-between; align-items: center; margin-top: 16px; padding-top: 16px; border-top: 1px solid var(--border-light); }
 .time { font-size: 13px; color: var(--text-muted); }
 .btn-detail { background: none; border: none; color: var(--primary); cursor: pointer; font-size: 14px; }
-.empty { text-align: center; padding: 64px; color: var(--text-muted); .empty-icon { font-size: 64px; margin-bottom: 16px; } p { margin-bottom: 24px; } }
 .btn-primary { display: inline-block; padding: 12px 24px; background: var(--primary); color: white; text-decoration: none; border-radius: var(--radius-md); }
 </style>

@@ -14,7 +14,7 @@ if str(ROOT) not in sys.path:
 
 from app.api.deps import create_access_token  # noqa: E402
 from app.api.routers.notifications import create_notification  # noqa: E402
-from app.db.models import Notification, User  # noqa: E402
+from app.db.models import Notification, ReviewEvent, User  # noqa: E402
 from app.db.session import Base, SessionLocal, engine  # noqa: E402
 from app.main import fastapi_app  # noqa: E402
 from app.services.review_agent import review_agent  # noqa: E402
@@ -32,6 +32,7 @@ def _cleanup(username: str) -> None:
         user_ids = [user.id for user in users]
         if user_ids:
             db.query(Notification).filter(Notification.user_id.in_(user_ids)).delete(synchronize_session=False)
+            db.query(ReviewEvent).filter(ReviewEvent.user_id.in_(user_ids)).delete(synchronize_session=False)
             db.query(User).filter(User.id.in_(user_ids)).delete(synchronize_session=False)
         db.commit()
     finally:
@@ -72,6 +73,27 @@ def _review_payload() -> dict:
         ],
     }
 
+def _false_positive_payload(user_id: int) -> tuple[dict, dict]:
+    detection_payload = {
+        "record_id": 9001,
+        "user_id": user_id,
+        "has_pest": True,
+        "merged_result": {
+            "diseases": [
+                {"name": "疑似误报目标", "confidence": 0.82, "severity": "medium"}
+            ]
+        },
+    }
+    assessment_payload = {
+        "risk_level": "low",
+        "risk_score": 0.2,
+        "risk_factors": ["图像质量较低", "目标边界模糊"],
+        "recommendations": ["建议人工复核"],
+        "is_false_positive": True,
+        "reasoning": "检测框与典型病虫害形态不一致",
+    }
+    return detection_payload, assessment_payload
+
 
 def main() -> None:
     Base.metadata.create_all(bind=engine)
@@ -84,6 +106,24 @@ def main() -> None:
         assert review_result["status"] == "warning", review_result
         assert review_result["warning"]["title"], review_result
         assert review_result["regional_alert"], review_result
+
+        false_detection, false_assessment = _false_positive_payload(user.id)
+        asyncio.run(review_agent.record_false_positive(false_detection, false_assessment))
+
+        db = SessionLocal()
+        try:
+            false_event = (
+                db.query(ReviewEvent)
+                .filter(ReviewEvent.user_id == user.id, ReviewEvent.record_id == 9001)
+                .order_by(ReviewEvent.id.desc())
+                .first()
+            )
+            assert false_event is not None, "误报审查事件未落库"
+            assert false_event.status == "false_positive"
+            assert false_event.risk_assessment
+            assert false_event.detection_snapshot
+        finally:
+            db.close()
 
         create_notification(
             user_id=user.id,

@@ -1,5 +1,6 @@
 <template>
   <div class="qna-page">
+    <PageHeader title="智能问答" subtitle="基于知识库与检测上下文的辅助问答" />
     <div class="qna-layout">
       <!-- 对话历史列表 -->
       <aside class="history-sidebar">
@@ -79,6 +80,16 @@
               </div>
             </div>
           </div>
+
+          <div v-if="sendError" class="inline-error-card">
+            <el-alert :title="sendError" type="error" show-icon :closable="false" />
+            <div class="error-actions">
+              <el-button size="small" type="primary" :disabled="loading || !lastFailedQuestion" @click="retryLastQuestion">
+                重试发送
+              </el-button>
+              <el-button size="small" :disabled="loading" @click="sendError = ''">关闭</el-button>
+            </div>
+          </div>
         </div>
 
         <div class="input-area">
@@ -106,6 +117,7 @@
 import { ref, nextTick, onMounted, watch } from 'vue'
 import { ElMessage } from 'element-plus'
 import { qnaApi } from '@/api'
+import PageHeader from '@/components/ui/PageHeader.vue'
 
 const conversations = ref([])
 const currentConversationId = ref(null)
@@ -115,6 +127,8 @@ const loading = ref(false)
 const messagesContainer = ref(null)
 const cropType = ref('')
 const category = ref('')
+const sendError = ref('')
+const lastFailedQuestion = ref('')
 
 const quickQuestions = [
   '水稻叶片发黄是什么原因？',
@@ -142,11 +156,8 @@ async function fetchConversations() {
     const res = await qnaApi.conversations({ page: 1, page_size: 50 })
     conversations.value = res.items || []
   } catch (e) {
-    // 使用模拟数据
-    conversations.value = [
-      { id: 1, title: '水稻叶片发黄问题', updated_at: '2026-04-27T10:30:00' },
-      { id: 2, title: '稻飞虱防治咨询', updated_at: '2026-04-26T15:20:00' }
-    ]
+    conversations.value = []
+    ElMessage.error('获取对话历史失败，请稍后重试')
   }
 }
 
@@ -157,10 +168,8 @@ async function loadConversation(id) {
     messages.value = res.messages || []
     scrollToBottom()
   } catch (e) {
-    messages.value = [
-      { role: 'user', content: '水稻叶片发黄是什么原因？', created_at: '2026-04-27T10:25:00' },
-      { role: 'assistant', content: '水稻叶片发黄可能有以下几种原因：\n\n**1. 氮素缺乏**\n叶片从老叶开始发黄，逐渐向上蔓延。这是水稻氮素缺乏的典型症状。\n\n**2. 病虫害**\n如稻飞虱、稻纵卷叶螟等害虫危害也会导致叶片发黄。\n\n**3. 病害**\n如白叶枯病、细菌性条斑病等病害也会引起叶片发黄。\n\n**4. 环境因素**\n长期淹水或排水不良导致根系活力下降，也会引起叶片发黄。\n\n建议您检查田间是否有虫害，观察发黄顺序，并考虑补充氮肥。如有需要可以上传图片进行检测。', sources: [{ id: 1, title: '水稻营养缺素症识别' }], created_at: '2026-04-27T10:26:00' }
-    ]
+    messages.value = []
+    ElMessage.error('加载对话失败，请稍后重试')
     scrollToBottom()
   }
 }
@@ -173,19 +182,20 @@ function startNewChat() {
 async function handleSend() {
   const text = inputMessage.value.trim()
   if (!text || loading.value) return
-  sendMessage(text)
+  sendMessage(text, { isRetry: false })
 }
 
-async function sendMessage(text) {
-  inputMessage.value = ''
+async function sendMessage(text, options = { isRetry: false }) {
+  if (!options.isRetry) {
+    inputMessage.value = ''
+    messages.value.push({
+      role: 'user',
+      content: text,
+      created_at: new Date().toISOString()
+    })
+  }
   loading.value = true
-  
-  // 添加用户消息
-  messages.value.push({
-    role: 'user',
-    content: text,
-    created_at: new Date().toISOString()
-  })
+  sendError.value = ''
   scrollToBottom()
 
   try {
@@ -210,16 +220,17 @@ async function sendMessage(text) {
     }
   } catch (e) {
     ElMessage.error('发送失败，请重试')
-    // 添加错误提示消息
-    messages.value.push({
-      role: 'assistant',
-      content: '抱歉，发生了错误。请稍后重试。',
-      created_at: new Date().toISOString()
-    })
+    lastFailedQuestion.value = text
+    sendError.value = e?.response?.data?.detail || '请求失败，请检查网络或稍后重试'
   } finally {
     loading.value = false
     scrollToBottom()
   }
+}
+
+function retryLastQuestion() {
+  if (!lastFailedQuestion.value || loading.value) return
+  sendMessage(lastFailedQuestion.value, { isRetry: true })
 }
 
 function viewSource(source) {
@@ -243,7 +254,7 @@ onMounted(() => {
 </script>
 
 <style lang="scss" scoped>
-.qna-page { height: calc(100vh - 140px); display: flex; }
+.qna-page { height: calc(100vh - 140px); display: flex; flex-direction: column; gap: 12px; }
 
 .qna-layout { display: flex; width: 100%; gap: 24px; }
 
@@ -294,6 +305,20 @@ onMounted(() => {
 
 .typing-indicator { display: flex; gap: 4px; padding: 12px 16px; span { width: 8px; height: 8px; background: var(--text-muted); border-radius: 50%; animation: typing 1.4s infinite; &:nth-child(2) { animation-delay: 0.2s; } &:nth-child(3) { animation-delay: 0.4s; } } }
 @keyframes typing { 0%, 60%, 100% { transform: translateY(0); } 30% { transform: translateY(-8px); } }
+
+.inline-error-card {
+  margin: 12px 0;
+  padding: 12px;
+  border: 1px solid var(--border-light);
+  border-radius: var(--radius-md);
+  background: var(--bg-secondary);
+}
+
+.error-actions {
+  margin-top: 10px;
+  display: flex;
+  gap: 8px;
+}
 
 .input-area { padding: 16px 24px; border-top: 1px solid var(--border-light); }
 .input-actions { display: flex; justify-content: space-between; align-items: center; margin-top: 8px; .hint { font-size: 12px; color: var(--text-muted); } }

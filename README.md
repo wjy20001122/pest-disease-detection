@@ -19,6 +19,7 @@ python -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
 uvicorn app.main:app --reload
+celery -A app.tasks.celery_app.celery_app worker --loglevel=INFO --pool=threads --concurrency=1
 ```
 
 ### Frontend
@@ -32,3 +33,4 @@ npm run dev
 ## Environment
 
 Copy `backend/.env.example` to `backend/.env` and fill in the required values before running the backend.
+For video async detection, make sure Redis and Celery worker are running.

@@ -58,14 +58,19 @@ echo "[6/7] 安装后端依赖..."
 cd $BACKEND_DIR
 python3 -m pip install -r requirements.txt
 
+# 发布前预检
+echo "[7/8] 运行发布前检查..."
+cd $BACKEND_DIR
+python3 scripts/predeploy_check.py
+
 # 初始化数据库
-echo "[7/7] 初始化数据库..."
+echo "[8/8] 初始化数据库..."
 cd $PROJECT_DIR
 python3 scripts/init_db.py
 
 # 配置 PM2
-echo "[8/8] 配置 PM2..."
-pm2 startOrReload $PROJECT_DIR/deploy/bt/ecosystem.config.json --only pdds-backend
+echo "[9/9] 配置 PM2..."
+pm2 startOrReload $PROJECT_DIR/deploy/bt/ecosystem.config.json --only pdds-backend,pdds-celery-worker
 pm2 save
 
 # 设置开机自启
@@ -81,6 +86,8 @@ echo "后端API: http://your-server-ip:8000"
 echo "API文档: http://your-server-ip:8000/docs"
 echo ""
 echo "常用命令:"
-echo "  pm2 logs pdds-backend    - 查看后端日志"
-echo "  pm2 restart pdds-backend - 重启后端"
-echo "  pm2 list                 - 查看进程状态"
+echo "  pm2 logs pdds-backend          - 查看后端日志"
+echo "  pm2 logs pdds-celery-worker    - 查看异步任务日志"
+echo "  pm2 restart pdds-backend       - 重启后端"
+echo "  pm2 restart pdds-celery-worker - 重启异步任务进程"
+echo "  pm2 list                       - 查看进程状态"

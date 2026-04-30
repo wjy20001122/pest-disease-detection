@@ -45,7 +45,9 @@
       "title": "用户注册与认证模块",
       "description": "实现用户注册、登录、JWT认证、权限控制",
       "priority": "high",
-      "dependencies": ["T01"],
+      "dependencies": [
+        "T01"
+      ],
       "status": "completed",
       "subtasks": [
         {
@@ -76,7 +78,9 @@
       "title": "检测路由与模型推理服务",
       "description": "实现云端AI优先+本地YOLO增强的两级检测路由，搭建模型推理服务",
       "priority": "high",
-      "dependencies": ["T01"],
+      "dependencies": [
+        "T01"
+      ],
       "status": "completed",
       "subtasks": [
         {
@@ -114,7 +118,9 @@
       "title": "图像检测功能",
       "description": "实现用户上传图片进行病虫害检测的完整流程",
       "priority": "high",
-      "dependencies": ["T03"],
+      "dependencies": [
+        "T03"
+      ],
       "status": "completed",
       "subtasks": [
         {
@@ -138,7 +144,9 @@
       "title": "视频检测功能",
       "description": "实现用户上传视频进行病虫害检测，支持帧采样和全检测跟踪",
       "priority": "high",
-      "dependencies": ["T03"],
+      "dependencies": [
+        "T03"
+      ],
       "status": "completed",
       "subtasks": [
         {
@@ -162,7 +170,9 @@
       "title": "摄像头实时检测功能",
       "description": "实现通过浏览器摄像头进行实时病虫害检测",
       "priority": "high",
-      "dependencies": ["T03"],
+      "dependencies": [
+        "T03"
+      ],
       "status": "completed",
       "subtasks": [
         {
@@ -186,7 +196,9 @@
       "title": "环境数据采集模块",
       "description": "实现检测时自动采集天气、地址、温度等环境数据",
       "priority": "medium",
-      "dependencies": ["T01"],
+      "dependencies": [
+        "T01"
+      ],
       "status": "completed",
       "subtasks": [
         {
@@ -210,7 +222,9 @@
       "title": "虫害跟踪模块",
       "description": "实现虫害检测后的持续跟踪和状态管理",
       "priority": "medium",
-      "dependencies": ["T04"],
+      "dependencies": [
+        "T04"
+      ],
       "status": "completed",
       "subtasks": [
         {
@@ -234,7 +248,9 @@
       "title": "可视化统计模块",
       "description": "实现病虫害检测数据的可视化统计展示",
       "priority": "medium",
-      "dependencies": ["T04"],
+      "dependencies": [
+        "T04"
+      ],
       "status": "completed",
       "subtasks": [
         {
@@ -298,7 +314,10 @@
       "title": "智能体自动审查与警告推送",
       "description": "实现检测结果自动审查、风险评估、警告生成和推送",
       "priority": "high",
-      "dependencies": ["T04", "T10"],
+      "dependencies": [
+        "T04",
+        "T10"
+      ],
       "status": "completed",
       "subtasks": [
         {
@@ -329,7 +348,10 @@
       "title": "管理员后台",
       "description": "实现管理员数据查看、统计分析、模型管理、系统监控等功能",
       "priority": "medium",
-      "dependencies": ["T02", "T09"],
+      "dependencies": [
+        "T02",
+        "T09"
+      ],
       "status": "completed",
       "subtasks": [
         {
@@ -381,7 +403,9 @@
       "title": "检测历史记录管理",
       "description": "实现用户检测历史的查看、筛选和管理",
       "priority": "medium",
-      "dependencies": ["T04"],
+      "dependencies": [
+        "T04"
+      ],
       "status": "completed",
       "subtasks": [
         {
@@ -405,7 +429,9 @@
       "title": "数据安全与隐私保护",
       "description": "实现数据加密、脱敏、异常检测等安全功能",
       "priority": "high",
-      "dependencies": ["T02"],
+      "dependencies": [
+        "T02"
+      ],
       "status": "completed",
       "subtasks": [
         {
@@ -429,7 +455,9 @@
       "title": "数据导入导出",
       "description": "实现用户检测数据的导入导出功能",
       "priority": "low",
-      "dependencies": ["T14"],
+      "dependencies": [
+        "T14"
+      ],
       "status": "completed",
       "subtasks": [
         {
@@ -453,7 +481,9 @@
       "title": "API接口与第三方集成",
       "description": "实现公开API接口供第三方系统集成",
       "priority": "medium",
-      "dependencies": ["T04"],
+      "dependencies": [
+        "T04"
+      ],
       "status": "completed",
       "subtasks": [
         {
@@ -477,7 +507,9 @@
       "title": "前端整体布局与响应式",
       "description": "实现响应式布局框架，适配桌面端和移动端",
       "priority": "medium",
-      "dependencies": ["T01"],
+      "dependencies": [
+        "T01"
+      ],
       "status": "completed",
       "subtasks": [
         {
@@ -501,7 +533,20 @@
       "title": "集成测试与部署",
       "description": "系统集成测试、性能测试和生产部署",
       "priority": "high",
-      "dependencies": ["T02", "T03", "T04", "T05", "T06", "T07", "T08", "T09", "T10", "T11", "T12", "T13"],
+      "dependencies": [
+        "T02",
+        "T03",
+        "T04",
+        "T05",
+        "T06",
+        "T07",
+        "T08",
+        "T09",
+        "T10",
+        "T11",
+        "T12",
+        "T13"
+      ],
       "status": "completed",
       "subtasks": [
         {
@@ -533,34 +578,145 @@
           "status": "completed"
         }
       ]
+    },
+    {
+      "id": "T21",
+      "title": "系统通知与消息中心",
+      "description": "实现统一消息中心，支持通知分类、未读计数、已读管理和高优先级折叠",
+      "priority": "medium",
+      "dependencies": [
+        "T12",
+        "T13"
+      ],
+      "status": "completed",
+      "subtasks": [
+        {
+          "id": "T21-1",
+          "title": "后端消息中心服务",
+          "detail": "实现通知分类查询(warning/system/agent/regional)；未读计数聚合；单条已读与全部已读；未读>50条时按时间优先级折叠策略",
+          "estimated_hours": 5,
+          "status": "completed"
+        },
+        {
+          "id": "T21-2",
+          "title": "前端消息中心页面",
+          "detail": "导航栏未读角标；消息中心分类Tab；已读状态交互；高优先级消息置顶与历史折叠展示",
+          "estimated_hours": 4,
+          "status": "completed"
+        }
+      ]
+    },
+    {
+      "id": "T22",
+      "title": "检测模型管理（管理员）",
+      "description": "实现模型版本上传、灰度发布、指标对比、默认版本切换与回滚",
+      "priority": "high",
+      "dependencies": [
+        "T03",
+        "T13"
+      ],
+      "status": "completed",
+      "subtasks": [
+        {
+          "id": "T22-1",
+          "title": "后端模型运维服务",
+          "detail": "模型格式与兼容性校验；模型版本注册；灰度发布与默认版本切换；低于阈值自动回滚策略",
+          "estimated_hours": 4,
+          "status": "completed"
+        },
+        {
+          "id": "T22-2",
+          "title": "前端模型运维页面",
+          "detail": "模型上传与版本列表；灰度发布配置；新旧模型指标对比；一键回滚与变更审计展示",
+          "estimated_hours": 5,
+          "status": "completed"
+        }
+      ]
+    },
+    {
+      "id": "T23",
+      "title": "系统监控与日志（管理员）",
+      "description": "实现系统运行监控、操作日志检索和异常告警闭环",
+      "priority": "high",
+      "dependencies": [
+        "T13",
+        "T20"
+      ],
+      "status": "completed",
+      "subtasks": [
+        {
+          "id": "T23-1",
+          "title": "后端监控与日志服务",
+          "detail": "服务健康状态采集(API延迟/错误率/资源使用率)；操作日志结构化存储与检索；异常阈值告警规则",
+          "estimated_hours": 5,
+          "status": "completed"
+        },
+        {
+          "id": "T23-2",
+          "title": "前端监控面板与日志页面",
+          "detail": "监控仪表板图表展示；日志筛选(时间/用户/操作类型)；异常告警列表与处理状态追踪",
+          "estimated_hours": 4,
+          "status": "completed"
+        }
+      ]
     }
   ],
-  "total_estimated_hours": 290,
+  "total_estimated_hours": 295,
   "phases": [
     {
       "name": "Phase 1 - 基础架构",
-      "tasks": ["T01", "T02", "T19"],
+      "tasks": [
+        "T01",
+        "T02",
+        "T19"
+      ],
       "goal": "完成项目骨架搭建、用户认证和前端布局"
     },
     {
       "name": "Phase 2 - 核心检测",
-      "tasks": ["T03", "T04", "T05", "T06"],
+      "tasks": [
+        "T03",
+        "T04",
+        "T05",
+        "T06"
+      ],
       "goal": "完成检测路由、图像/视频/摄像头三大检测功能"
     },
     {
       "name": "Phase 3 - 数据与智能",
-      "tasks": ["T07", "T08", "T09", "T10", "T11", "T12"],
+      "tasks": [
+        "T07",
+        "T08",
+        "T09",
+        "T10",
+        "T11",
+        "T12"
+      ],
       "goal": "完成环境数据、跟踪、统计、知识库、问答Agent和智能体审查"
     },
     {
       "name": "Phase 4 - 管理与扩展",
-      "tasks": ["T13", "T14", "T16", "T17", "T18"],
-      "goal": "完成管理后台、历史记录、国际化、安全、导入导出、API集成"
+      "tasks": [
+        "T13",
+        "T14",
+        "T16",
+        "T17",
+        "T18",
+        "T21",
+        "T22",
+        "T23"
+      ],
+      "goal": "完成管理后台、历史记录、安全、导入导出、API集成、消息中心、模型运维与系统监控"
     },
     {
       "name": "Phase 5 - 测试与部署",
-      "tasks": ["T20"],
+      "tasks": [
+        "T20"
+      ],
       "goal": "完成测试和生产部署"
     }
+  ],
+  "excluded_requirements": [
+    "R15 多语言与国际化支持"
   ]
 }

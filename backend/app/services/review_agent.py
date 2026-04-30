@@ -1,7 +1,20 @@
 import json
+import logging
 from typing import Optional, Dict, Any, List
 from datetime import datetime, timedelta
+
+from app.core.config import settings
+from app.db.models import ReviewEvent
+from app.db.session import SessionLocal
 from app.services.deepseek_service import deepseek_service
+from app.services.system_config_service import (
+    DEFAULT_SYSTEM_CONFIGS,
+    get_system_config_float,
+    get_system_config_int,
+)
+
+
+logger = logging.getLogger(__name__)
 
 
 class ReviewAgent:
@@ -52,6 +65,15 @@ class ReviewAgent:
         判断是否需要审查
         触发条件：置信度>80% 或 严重等级为high/critical
         """
+        confidence_threshold = float(DEFAULT_SYSTEM_CONFIGS["review_trigger_confidence"])
+        db = SessionLocal()
+        try:
+            confidence_threshold = get_system_config_float(db, "review_trigger_confidence")
+        except Exception:
+            db.rollback()
+        finally:
+            db.close()
+
         merged_result = detection_result.get("merged_result", {})
         diseases = merged_result.get("diseases", [])
 
@@ -59,7 +81,7 @@ class ReviewAgent:
             confidence = disease.get("confidence", 0)
             severity = disease.get("severity", "low").lower()
 
-            if confidence >= 0.8 or severity in ["high", "critical"]:
+            if confidence >= confidence_threshold or severity in ["high", "critical"]:
                 return True
 
         return False
@@ -86,6 +108,15 @@ class ReviewAgent:
     async def assess_risk(self, context: Dict[str, Any]) -> Dict[str, Any]:
         """调用LLM进行风险评估"""
         detection = context.get("detection", {})
+        if not settings.enable_cloud_analysis:
+            return {
+                "risk_level": "medium",
+                "risk_score": 0.5,
+                "risk_factors": ["当前已禁用云端分析，风险评估基于本地检测结果。"],
+                "recommendations": ["建议人工确认"],
+                "is_false_positive": False,
+                "reasoning": "云端分析已禁用，采用本地规则评估。",
+            }
 
         try:
             assessment = await self.deepseek.assess_risk(
@@ -110,7 +141,35 @@ class ReviewAgent:
         assessment: Dict[str, Any]
     ):
         """记录误报信息"""
-        pass
+        reason = assessment.get("reasoning") or ""
+        if not reason:
+            risk_factors = assessment.get("risk_factors") or []
+            if isinstance(risk_factors, list):
+                reason = "；".join(str(item) for item in risk_factors if item)
+            else:
+                reason = str(risk_factors)
+
+        record_id = detection_result.get("record_id")
+        user_id = detection_result.get("user_id")
+
+        db = SessionLocal()
+        try:
+            event = ReviewEvent(
+                record_id=int(record_id) if record_id is not None else None,
+                user_id=int(user_id) if user_id is not None else None,
+                status="false_positive",
+                reason=reason,
+                risk_assessment=json.dumps(assessment, ensure_ascii=False),
+                detection_snapshot=json.dumps(detection_result, ensure_ascii=False),
+                created_at=datetime.now(),
+            )
+            db.add(event)
+            db.commit()
+        except Exception:
+            db.rollback()
+            logger.exception("Failed to persist false positive review event")
+        finally:
+            db.close()
 
     async def generate_warning(
         self,
@@ -118,6 +177,17 @@ class ReviewAgent:
         risk_assessment: Dict[str, Any]
     ) -> Dict[str, Any]:
         """生成警告信息"""
+        if not settings.enable_cloud_analysis:
+            diseases = detection_result.get("merged_result", {}).get("diseases", [])
+            disease_name = diseases[0].get("name", "未知病虫害") if diseases else "未知病虫害"
+            return {
+                "title": f"病虫害预警：{disease_name}",
+                "content": f"本地模型检测到{disease_name}，请尽快实地复核并采取防治措施。",
+                "severity": risk_assessment.get("risk_level", "medium"),
+                "tags": ["病虫害", "本地检测"],
+                "action_items": risk_assessment.get("recommendations", ["建议人工确认"]),
+            }
+
         try:
             warning = await self.deepseek.generate_warning(
                 detection_result=detection_result,
@@ -139,13 +209,29 @@ class ReviewAgent:
     async def check_regional_alert(
         self,
         detection_result: Dict[str, Any],
-        threshold: int = 3,
-        days: int = 3
+        threshold: int | None = None,
+        days: int | None = None
     ) -> Optional[Dict[str, Any]]:
         """
         检查是否需要区域预警
         同地区3天内检测到相同病虫害>=3例时触发
         """
+        db = SessionLocal()
+        try:
+            if threshold is None:
+                threshold = get_system_config_int(db, "regional_alert_threshold")
+            if days is None:
+                days = get_system_config_int(db, "regional_alert_days")
+        except Exception:
+            db.rollback()
+        finally:
+            db.close()
+
+        if threshold is None:
+            threshold = int(DEFAULT_SYSTEM_CONFIGS["regional_alert_threshold"])
+        if days is None:
+            days = int(DEFAULT_SYSTEM_CONFIGS["regional_alert_days"])
+
         diseases = detection_result.get("merged_result", {}).get("diseases", [])
         disease_name = diseases[0].get("name", "未知病虫害") if diseases else "未知病虫害"
         environment = detection_result.get("environment") or {}

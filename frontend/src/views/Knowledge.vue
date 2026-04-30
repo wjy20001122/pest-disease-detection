@@ -1,9 +1,13 @@
 <template>
   <div class="knowledge-page">
+    <PageHeader title="知识库" subtitle="按作物、类别和特征检索病虫害知识条目" />
+
     <div class="search-section">
       <div class="search-box">
         <el-input v-model="keyword" placeholder="搜索病虫害知识..." size="large" clearable @keyup.enter="handleSearch">
-          <template #prefix>🔍</template>
+          <template #prefix>
+            <el-icon><Search /></el-icon>
+          </template>
         </el-input>
         <el-button type="primary" size="large" @click="handleSearch">搜索</el-button>
       </div>
@@ -57,10 +61,7 @@
           </div>
         </div>
 
-        <div v-else class="empty">
-          <div class="empty-icon">📚</div>
-          <p>暂无相关知识</p>
-        </div>
+        <EmptyState v-else title="暂无相关知识" description="可以调整筛选条件后重新搜索" :icon="Reading" />
 
         <el-pagination v-if="total > pageSize" layout="prev, pager, next" :total="total" v-model:current-page="page" :page-size="pageSize" @current-change="fetchData" />
       </main>
@@ -118,8 +119,10 @@
 <script setup>
 import { ref, reactive, computed, onMounted, watch } from 'vue'
 import { ElMessage } from 'element-plus'
-import { Loading } from '@element-plus/icons-vue'
+import { Loading, Reading, Search } from '@element-plus/icons-vue'
 import { knowledgeApi } from '@/api'
+import PageHeader from '@/components/ui/PageHeader.vue'
+import EmptyState from '@/components/ui/EmptyState.vue'
 
 const keyword = ref('')
 const cropType = ref('')
@@ -250,8 +253,6 @@ onMounted(() => {
 }
 .card-summary { font-size: 14px; color: var(--text-secondary); margin-bottom: 12px; line-height: 1.6; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
 .card-tags { display: flex; gap: 6px; flex-wrap: wrap; }
-
-.empty { text-align: center; padding: 64px; color: var(--text-muted); .empty-icon { font-size: 64px; margin-bottom: 16px; } }
 
 :deep(.knowledge-detail-dialog) {
   .detail-content { padding: 8px; }

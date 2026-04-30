@@ -1,28 +1,53 @@
+from __future__ import annotations
+
+import json
 import uuid
 from datetime import datetime
-from typing import Optional, List
-from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy.ext.asyncio import AsyncSession
+from typing import Any
 
-from app.db.session import get_db
-from app.db.models import User
+from fastapi import APIRouter, Body, Depends, HTTPException, Query
+from pydantic import BaseModel
+from sqlalchemy import desc, func, select
+from sqlalchemy.orm import Session
+
 from app.api.deps import get_current_user
+from app.db.models import QnAConversation, QnAMessage, User
+from app.db.session import get_db
 from app.services.deepseek_service import deepseek_service
-from app.api.routers.knowledge import search_knowledge
+from app.services.knowledge_service import search_knowledge_for_matching
 
 router = APIRouter(prefix="/qna", tags=["问答"])
 
 
-conversations_db = {}
-current_conversation_id = 1
+class AskPayload(BaseModel):
+    question: str
+    conversation_id: str | None = None
+    crop_type: str | None = None
+    category: str | None = None
 
 
-def build_context_from_knowledge(items: List[dict]) -> str:
-    """从知识库条目构建上下文"""
+def _to_iso(value: datetime | None) -> str:
+    if not value:
+        return ""
+    return value.isoformat()
+
+
+def _safe_sources(raw: str | None) -> list[dict[str, Any]]:
+    if not raw:
+        return []
+    try:
+        value = json.loads(raw)
+        if isinstance(value, list):
+            return [item for item in value if isinstance(item, dict)]
+    except Exception:
+        return []
+    return []
+
+
+def _build_context_from_knowledge(items: list[dict[str, Any]]) -> str:
     if not items:
         return ""
-
-    context_parts = []
+    context_parts: list[str] = []
     for item in items:
         context_parts.append(
             f"【{item['title']}】\n"
@@ -37,75 +62,144 @@ def build_context_from_knowledge(items: List[dict]) -> str:
     return "\n\n".join(context_parts)
 
 
+def _get_or_create_conversation(
+    db: Session,
+    *,
+    current_user: User,
+    question: str,
+    conversation_id: str | None,
+    crop_type: str | None,
+    category: str | None,
+) -> QnAConversation:
+    if conversation_id:
+        existing = db.execute(
+            select(QnAConversation).where(
+                QnAConversation.conversation_id == conversation_id,
+                QnAConversation.user_id == current_user.id,
+            )
+        ).scalar_one_or_none()
+        if not existing:
+            raise HTTPException(status_code=404, detail="对话不存在")
+        if crop_type:
+            existing.crop_type = crop_type
+        if category:
+            existing.category = category
+        return existing
+
+    now = datetime.now()
+    conversation = QnAConversation(
+        conversation_id=uuid.uuid4().hex,
+        user_id=current_user.id,
+        title=question[:50],
+        crop_type=crop_type,
+        category=category,
+        created_at=now,
+        updated_at=now,
+    )
+    db.add(conversation)
+    db.flush()
+    return conversation
+
+
 @router.post("/ask")
 async def ask(
-    question: str = Query(...),
-    conversation_id: str = Query(None),
-    crop_type: str = Query(None, description="作物类型筛选"),
-    category: str = Query(None, description="类别筛选：虫害/病害"),
-    current_user: User = Depends(get_current_user)
+    payload: AskPayload | None = Body(None),
+    question: str | None = Query(None),
+    conversation_id: str | None = Query(None),
+    crop_type: str | None = Query(None, description="作物类型筛选"),
+    category: str | None = Query(None, description="类别筛选：虫害/病害"),
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
 ):
-    global current_conversation_id
+    actual_question = (payload.question if payload else question or "").strip()
+    actual_conversation_id = (payload.conversation_id if payload else conversation_id) or None
+    actual_crop_type = (payload.crop_type if payload else crop_type) or None
+    actual_category = (payload.category if payload else category) or None
 
-    if not conversation_id:
-        conversation_id = str(current_conversation_id)
-        current_conversation_id += 1
-        conversations_db[conversation_id] = {
-            "id": conversation_id,
-            "user_id": current_user.id,
-            "title": question[:50],
-            "messages": [],
-            "created_at": datetime.now().isoformat(),
-            "updated_at": datetime.now().isoformat()
-        }
+    if not actual_question:
+        raise HTTPException(status_code=422, detail="问题不能为空")
 
-    if conversation_id not in conversations_db:
-        raise HTTPException(status_code=404, detail="对话不存在")
-
-    conv = conversations_db[conversation_id]
-
-    user_message = {
-        "role": "user",
-        "content": question,
-        "created_at": datetime.now().isoformat()
-    }
-    conv["messages"].append(user_message)
-
-    relevant_knowledge = search_knowledge(
-        keyword=question,
-        crop_type=crop_type,
-        category=category
+    conversation = _get_or_create_conversation(
+        db,
+        current_user=current_user,
+        question=actual_question,
+        conversation_id=actual_conversation_id,
+        crop_type=actual_crop_type,
+        category=actual_category,
     )
 
-    context = build_context_from_knowledge(relevant_knowledge[:3])
+    now = datetime.now()
+    db.add(
+        QnAMessage(
+            conversation_id=conversation.conversation_id,
+            role="user",
+            content=actual_question,
+            sources_json=None,
+            created_at=now,
+        )
+    )
+
+    sources = search_knowledge_for_matching(
+        db,
+        keyword=actual_question,
+        crop_type=actual_crop_type,
+        category=actual_category,
+        limit=3,
+    )
+    context = _build_context_from_knowledge(sources)
 
     try:
-        answer = await deepseek_service.ask_with_context(question, context, relevant_knowledge[:3])
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"AI 服务错误: {str(e)}")
+        answer = await deepseek_service.ask_with_context(
+            actual_question,
+            context=context,
+            sources=sources,
+            selection_context={
+                "crop_type": actual_crop_type or "",
+                "category": actual_category or "",
+                "strict_selection": True,
+            },
+        )
+    except Exception as exc:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"AI 服务错误: {exc}")
 
-    assistant_message = {
-        "role": "assistant",
-        "content": answer,
+    db.add(
+        QnAMessage(
+            conversation_id=conversation.conversation_id,
+            role="assistant",
+            content=answer,
+            sources_json=json.dumps(
+                [
+                    {
+                        "id": item["id"],
+                        "title": item["title"],
+                        "disease_name": item["disease_name"],
+                        "crop_type": item["crop_type"],
+                        "category": item["category"],
+                    }
+                    for item in sources
+                ],
+                ensure_ascii=False,
+            ),
+            created_at=datetime.now(),
+        )
+    )
+    conversation.updated_at = datetime.now()
+    db.commit()
+
+    return {
+        "answer": answer,
         "sources": [
             {
                 "id": item["id"],
                 "title": item["title"],
                 "disease_name": item["disease_name"],
                 "crop_type": item["crop_type"],
-                "category": item["category"]
+                "category": item["category"],
             }
-            for item in relevant_knowledge[:3]
+            for item in sources
         ],
-        "created_at": datetime.now().isoformat()
-    }
-    conv["messages"].append(assistant_message)
-    conv["updated_at"] = datetime.now().isoformat()
-
-    return {
-        "answer": answer,
-        "sources": assistant_message["sources"],
-        "conversation_id": conversation_id
+        "conversation_id": conversation.conversation_id,
     }
 
 
@@ -113,37 +207,66 @@ async def ask(
 async def list_conversations(
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=50),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
 ):
-    user_convs = [
-        {k: v for k, v in conv.items() if k != "messages"}
-        for conv in conversations_db.values()
-        if conv.get("user_id") == current_user.id
+    query = select(QnAConversation).where(QnAConversation.user_id == current_user.id)
+    total = db.scalar(select(func.count()).select_from(query.subquery())) or 0
+    rows = db.execute(
+        query.order_by(desc(QnAConversation.updated_at))
+        .offset((page - 1) * page_size)
+        .limit(page_size)
+    ).scalars().all()
+    items = [
+        {
+            "id": row.conversation_id,
+            "user_id": row.user_id,
+            "title": row.title,
+            "crop_type": row.crop_type,
+            "category": row.category,
+            "created_at": _to_iso(row.created_at),
+            "updated_at": _to_iso(row.updated_at),
+        }
+        for row in rows
     ]
-
-    user_convs.sort(key=lambda x: x.get("updated_at", ""), reverse=True)
-
-    offset = (page - 1) * page_size
-    items = user_convs[offset:offset + page_size]
-
-    return {
-        "items": items,
-        "total": len(user_convs),
-        "page": page,
-        "page_size": page_size
-    }
+    return {"items": items, "total": total, "page": page, "page_size": page_size}
 
 
 @router.get("/conversations/{conv_id}")
 async def get_conversation(
     conv_id: str,
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
 ):
-    if conv_id not in conversations_db:
+    conversation = db.execute(
+        select(QnAConversation).where(
+            QnAConversation.conversation_id == conv_id,
+            QnAConversation.user_id == current_user.id,
+        )
+    ).scalar_one_or_none()
+    if not conversation:
         raise HTTPException(status_code=404, detail="对话不存在")
 
-    conv = conversations_db[conv_id]
-    if conv.get("user_id") != current_user.id:
-        raise HTTPException(status_code=403, detail="无权限访问此对话")
-
-    return conv
+    messages = db.execute(
+        select(QnAMessage)
+        .where(QnAMessage.conversation_id == conv_id)
+        .order_by(QnAMessage.id.asc())
+    ).scalars().all()
+    return {
+        "id": conversation.conversation_id,
+        "user_id": conversation.user_id,
+        "title": conversation.title,
+        "crop_type": conversation.crop_type,
+        "category": conversation.category,
+        "created_at": _to_iso(conversation.created_at),
+        "updated_at": _to_iso(conversation.updated_at),
+        "messages": [
+            {
+                "role": message.role,
+                "content": message.content,
+                "sources": _safe_sources(message.sources_json),
+                "created_at": _to_iso(message.created_at),
+            }
+            for message in messages
+        ],
+    }

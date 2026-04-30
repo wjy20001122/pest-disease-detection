@@ -41,6 +41,25 @@ class Settings:
     weather_api_base_url: str = os.getenv("WEATHER_API_BASE_URL", "https://devapi.qweather.com").strip()
     map_api_key: str = os.getenv("MAP_API_KEY", "").strip()
     map_api_base_url: str = os.getenv("MAP_API_BASE_URL", "https://restapi.amap.com").strip()
+    enable_cloud_analysis: bool = os.getenv("ENABLE_CLOUD_ANALYSIS", "true").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
+    redis_url: str = os.getenv("REDIS_URL", "redis://127.0.0.1:6379/0").strip()
+    celery_broker_url: str = os.getenv(
+        "CELERY_BROKER_URL",
+        os.getenv("REDIS_URL", "redis://127.0.0.1:6379/0"),
+    ).strip()
+    celery_result_backend: str = os.getenv(
+        "CELERY_RESULT_BACKEND",
+        os.getenv("REDIS_URL", "redis://127.0.0.1:6379/0"),
+    ).strip()
+    celery_video_task_soft_time_limit_sec: int = int(os.getenv("CELERY_VIDEO_TASK_SOFT_TIME_LIMIT_SEC", "1800"))
+    celery_video_task_hard_time_limit_sec: int = int(os.getenv("CELERY_VIDEO_TASK_HARD_TIME_LIMIT_SEC", "2100"))
+    celery_video_task_max_retries: int = int(os.getenv("CELERY_VIDEO_TASK_MAX_RETRIES", "2"))
+    celery_video_task_retry_backoff_sec: int = int(os.getenv("CELERY_VIDEO_TASK_RETRY_BACKOFF_SEC", "30"))
 
     @property
     def database_url(self) -> str:

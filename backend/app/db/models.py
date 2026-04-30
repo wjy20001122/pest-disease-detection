@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from sqlalchemy import Column, DateTime, Float, Integer, String, Text
+from sqlalchemy import Column, DateTime, Float, Index, Integer, String, Text
 
 from app.db.session import Base
 
@@ -23,6 +23,9 @@ class User(Base):
 
 class ImgRecord(Base):
     __tablename__ = "imgrecords"
+    __table_args__ = (
+        Index("idx_imgrecords_username_start_time", "username", "start_time"),
+    )
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     modelKey = Column("model_key", String(255))
@@ -39,6 +42,9 @@ class ImgRecord(Base):
 
 class VideoRecord(Base):
     __tablename__ = "videorecords"
+    __table_args__ = (
+        Index("idx_videorecords_username_start_time", "username", "start_time"),
+    )
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     modelKey = Column("model_key", String(255))
@@ -51,6 +57,9 @@ class VideoRecord(Base):
 
 class CameraRecord(Base):
     __tablename__ = "camerarecords"
+    __table_args__ = (
+        Index("idx_camerarecords_username_start_time", "username", "start_time"),
+    )
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     modelKey = Column("model_key", String(255))
@@ -150,6 +159,107 @@ class ModelPolicy(Base):
     updated_at = Column(DateTime, nullable=True)
 
 
+class ReviewEvent(Base):
+    __tablename__ = "review_events"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    record_id = Column(Integer, nullable=True, index=True)
+    user_id = Column(Integer, nullable=True, index=True)
+    status = Column(String(50), nullable=False, index=True)
+    reason = Column(Text, nullable=True)
+    risk_assessment = Column(Text, nullable=True)
+    detection_snapshot = Column(Text, nullable=True)
+    created_at = Column(DateTime, nullable=False)
+
+
+class VideoTask(Base):
+    __tablename__ = "video_tasks"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    session_id = Column(String(100), nullable=False, unique=True, index=True)
+    username = Column(String(100), nullable=False, index=True)
+    model_key = Column(String(255), nullable=False)
+    status = Column(String(20), nullable=False, index=True, default="queued")
+    progress = Column(Float, nullable=False, default=0.0)
+    frame_count = Column(Integer, nullable=False, default=0)
+    total_counts_json = Column(Text, nullable=True)
+    total_tracks = Column(Integer, nullable=False, default=0)
+    detections_json = Column(Text, nullable=True)
+    output_url = Column(String(500), nullable=True)
+    error_message = Column(Text, nullable=True)
+    stop_requested = Column(Integer, nullable=False, default=0)
+    created_at = Column(DateTime, nullable=False)
+    updated_at = Column(DateTime, nullable=False)
+
+
+class SystemConfig(Base):
+    __tablename__ = "system_configs"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    key = Column(String(100), nullable=False, unique=True, index=True)
+    value = Column(Text, nullable=False)
+    updated_by = Column(Integer, nullable=True)
+    updated_at = Column(DateTime, nullable=False)
+
+
+class PermissionAuditLog(Base):
+    __tablename__ = "permission_audit_logs"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(Integer, nullable=True, index=True)
+    path = Column(String(500), nullable=False)
+    method = Column(String(20), nullable=False)
+    status_code = Column(Integer, nullable=False, index=True)
+    client_ip = Column(String(64), nullable=True)
+    reason = Column(Text, nullable=True)
+    created_at = Column(DateTime, nullable=False, index=True)
+
+
+class KnowledgeItem(Base):
+    __tablename__ = "knowledge_items"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    title = Column(String(255), nullable=False)
+    disease_name = Column(String(120), nullable=False, index=True)
+    crop_type = Column(String(50), nullable=False, index=True)
+    category = Column(String(50), nullable=False, index=True)
+    shape = Column(String(255), nullable=True)
+    color = Column(String(255), nullable=True)
+    size = Column(String(255), nullable=True)
+    symptoms = Column(Text, nullable=True)
+    conditions = Column(Text, nullable=True)
+    prevention = Column(Text, nullable=True)
+    tags_json = Column(Text, nullable=True)
+    source_name = Column(String(255), nullable=True)
+    source_url = Column(String(500), nullable=True)
+    updated_at = Column(DateTime, nullable=False, index=True)
+    created_at = Column(DateTime, nullable=False)
+
+
+class QnAConversation(Base):
+    __tablename__ = "qna_conversations"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    conversation_id = Column(String(64), nullable=False, unique=True, index=True)
+    user_id = Column(Integer, nullable=False, index=True)
+    title = Column(String(255), nullable=False)
+    crop_type = Column(String(50), nullable=True)
+    category = Column(String(50), nullable=True)
+    created_at = Column(DateTime, nullable=False)
+    updated_at = Column(DateTime, nullable=False, index=True)
+
+
+class QnAMessage(Base):
+    __tablename__ = "qna_messages"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    conversation_id = Column(String(64), nullable=False, index=True)
+    role = Column(String(20), nullable=False)
+    content = Column(Text, nullable=False)
+    sources_json = Column(Text, nullable=True)
+    created_at = Column(DateTime, nullable=False)
+
+
 USER_FIELDS = {
     "id",
     "username",
@@ -198,4 +308,56 @@ DATA_COLLECTION_FIELDS = {
     "categories",
     "ossFolder",
     "ossImageUrls",
+}
+VIDEO_TASK_FIELDS = {
+    "id",
+    "session_id",
+    "username",
+    "model_key",
+    "status",
+    "progress",
+    "frame_count",
+    "total_counts_json",
+    "total_tracks",
+    "detections_json",
+    "output_url",
+    "error_message",
+    "stop_requested",
+    "created_at",
+    "updated_at",
+}
+SYSTEM_CONFIG_FIELDS = {
+    "id",
+    "key",
+    "value",
+    "updated_by",
+    "updated_at",
+}
+PERMISSION_AUDIT_LOG_FIELDS = {
+    "id",
+    "user_id",
+    "path",
+    "method",
+    "status_code",
+    "client_ip",
+    "reason",
+    "created_at",
+}
+KNOWLEDGE_ITEM_FIELDS = {
+    "id",
+    "title",
+    "disease_name",
+    "crop_type",
+    "category",
+    "shape",
+    "color",
+    "size",
+    "symptoms",
+    "conditions",
+    "prevention",
+    "tags_json",
+    "source_name",
+    "source_url",
+    "updated_at",
+    "created_at",
 }

@@ -1,5 +1,7 @@
 <template>
   <div class="settings-page">
+    <PageHeader title="个人设置" subtitle="管理资料、安全、通知与检测偏好" />
+
     <div class="settings-layout">
       <!-- 设置导航 -->
       <aside class="settings-nav">
@@ -266,6 +268,7 @@ import { ref, reactive, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { useUserStore } from '@/stores/user'
 import { authApi } from '@/api'
+import PageHeader from '@/components/ui/PageHeader.vue'
 
 const userStore = useUserStore()
 const activeTab = ref('profile')

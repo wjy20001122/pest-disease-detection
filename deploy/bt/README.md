@@ -64,7 +64,9 @@ bash deploy/bt/deploy.sh
 ```bash
 pm2 list
 pm2 logs pdds-backend
+pm2 logs pdds-celery-worker
 pm2 restart pdds-backend
+pm2 restart pdds-celery-worker
 pm2 save
 ```
 
@@ -83,7 +85,18 @@ curl -I http://127.0.0.1
 - 通知已读与全部已读
 - 管理后台（用户/通知/模型）
 
-## 8) GitHub Actions 说明
+## 8) 发布前检查（阻断）
+
+部署脚本与 CI 都会执行：
+
+```bash
+cd /www/pest-disease-detection/backend
+python3 scripts/predeploy_check.py
+```
+
+检查项包含 DB、Redis、OSS、API 健康路由；任一失败会阻断发布。
+
+## 9) GitHub Actions 说明
 
 - 当前 `deploy.yml` 监听 `master`
 - `deploy-models` 仅在 `model-server/models/**` 存在时触发

@@ -1,5 +1,7 @@
 <template>
   <div class="admin-page">
+    <PageHeader title="用户管理" subtitle="管理用户角色、状态与基础信息" />
+
     <div class="toolbar">
       <el-input
         v-model="filters.keyword"
@@ -65,6 +67,7 @@
 import { onMounted, reactive, ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import { adminApi } from '@/api'
+import PageHeader from '@/components/ui/PageHeader.vue'
 
 const filters = reactive({
   keyword: '',

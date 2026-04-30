@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from datetime import datetime
+import json
+from datetime import datetime, timedelta
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -10,9 +11,21 @@ from sqlalchemy.orm import Session
 
 from app.api.deps import get_admin_user
 from app.api.routers.notifications import _notification_to_dict, create_notification
-from app.db.models import CameraRecord, ImgRecord, ModelPolicy, Notification, User, VideoRecord
+from app.db.models import (
+    CameraRecord,
+    ImgRecord,
+    KnowledgeItem,
+    ModelPolicy,
+    Notification,
+    PermissionAuditLog,
+    User,
+    VideoRecord,
+)
 from app.db.session import get_db
+from app.services.knowledge_service import knowledge_item_to_dict
 from app.services.legacy_runtime import load_legacy_runtime
+from app.services.queue_monitor_service import get_queue_metrics
+from app.services.system_config_service import list_system_configs, update_system_configs
 
 router = APIRouter(prefix="/admin", tags=["管理后台"])
 
@@ -87,6 +100,49 @@ def _model_policy_to_dict(policy: ModelPolicy) -> dict[str, Any]:
     }
 
 
+def _parse_stats_window(period: str, start_date: str | None, end_date: str | None) -> tuple[datetime, datetime]:
+    now = datetime.now()
+    if period == "day":
+        start = now - timedelta(days=7)
+    elif period == "week":
+        start = now - timedelta(weeks=4)
+    else:
+        start = now - timedelta(days=90)
+
+    if start_date:
+        start = datetime.strptime(start_date, "%Y-%m-%d")
+    if end_date:
+        end = datetime.strptime(end_date, "%Y-%m-%d").replace(hour=23, minute=59, second=59)
+    else:
+        end = now
+    return start, end
+
+
+def _record_in_window(start_time: str | None, start: datetime, end: datetime) -> bool:
+    if not start_time:
+        return False
+    try:
+        value = datetime.strptime(start_time[:19], "%Y-%m-%d %H:%M:%S")
+    except ValueError:
+        try:
+            value = datetime.strptime(start_time[:10], "%Y-%m-%d")
+        except ValueError:
+            return False
+    return start <= value <= end
+
+
+def _safe_load_json_list(raw: str | None) -> list[Any]:
+    if not raw:
+        return []
+    try:
+        value = json.loads(raw)
+        if isinstance(value, list):
+            return value
+    except (json.JSONDecodeError, TypeError):
+        return []
+    return []
+
+
 @router.get("/dashboard")
 async def get_dashboard(
     current_user: User = Depends(get_admin_user),
@@ -136,6 +192,79 @@ async def get_dashboard(
             "video": video_count,
             "camera": camera_count,
         },
+    }
+
+
+@router.get("/stats")
+async def get_admin_stats(
+    period: str = Query("month", description="统计周期：day/week/month"),
+    start_date: str | None = Query(None, description="开始日期 YYYY-MM-DD"),
+    end_date: str | None = Query(None, description="结束日期 YYYY-MM-DD"),
+    current_user: User = Depends(get_admin_user),
+    db: Session = Depends(get_db),
+):
+    del current_user
+    start, end = _parse_stats_window(period, start_date, end_date)
+
+    img_records = db.execute(select(ImgRecord)).scalars().all()
+    video_records = db.execute(select(VideoRecord)).scalars().all()
+    camera_records = db.execute(select(CameraRecord)).scalars().all()
+
+    pest_distribution: dict[str, int] = {}
+    crop_distribution: dict[str, int] = {}
+    daily_stats: dict[str, int] = {}
+    confidence_stats: list[float] = []
+
+    for record in img_records:
+        if not _record_in_window(record.startTime, start, end):
+            continue
+        date_key = record.startTime[:10] if record.startTime else "unknown"
+        daily_stats[date_key] = daily_stats.get(date_key, 0) + 1
+
+        labels = _safe_load_json_list(record.label)
+        confidences = _safe_load_json_list(record.confidence)
+        crop_name = (record.cropType or "").strip()
+
+        if crop_name:
+            crop_distribution[crop_name] = crop_distribution.get(crop_name, 0) + 1
+
+        for label in labels:
+            label_name = str(label).strip()
+            if label_name:
+                pest_distribution[label_name] = pest_distribution.get(label_name, 0) + 1
+        for confidence in confidences:
+            try:
+                confidence_stats.append(float(confidence))
+            except (TypeError, ValueError):
+                continue
+
+    for record in [*video_records, *camera_records]:
+        if not _record_in_window(record.startTime, start, end):
+            continue
+        date_key = record.startTime[:10] if record.startTime else "unknown"
+        daily_stats[date_key] = daily_stats.get(date_key, 0) + 1
+
+    trend_data = [
+        {"date": date, "count": count}
+        for date, count in sorted(daily_stats.items(), key=lambda item: item[0])
+    ]
+
+    return {
+        "total": sum(daily_stats.values()),
+        "period": period,
+        "start_date": start.strftime("%Y-%m-%d"),
+        "end_date": end.strftime("%Y-%m-%d"),
+        "disease_distribution": [
+            {"name": name, "count": count}
+            for name, count in sorted(pest_distribution.items(), key=lambda x: x[1], reverse=True)
+        ],
+        "crop_distribution": [
+            {"name": name, "count": count}
+            for name, count in sorted(crop_distribution.items(), key=lambda x: x[1], reverse=True)
+        ],
+        "daily_trend": trend_data,
+        "avg_confidence": round(sum(confidence_stats) / len(confidence_stats), 2) if confidence_stats else 0,
+        "high_confidence_count": len([value for value in confidence_stats if value >= 0.8]),
     }
 
 
@@ -362,6 +491,10 @@ class ModelPolicyPayload(BaseModel):
     fallback_notice: str | None = None
 
 
+class ConfigsUpdatePayload(BaseModel):
+    values: dict[str, Any]
+
+
 @router.put("/models/{model_key}")
 async def update_model_policy(
     model_key: str,
@@ -399,10 +532,124 @@ async def update_model_policy(
 
 
 @router.get("/knowledge")
-async def list_knowledge_placeholder(
+async def list_knowledge(
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
+    keyword: str | None = Query(None),
+    crop_type: str | None = Query(None),
+    category: str | None = Query(None),
     current_user: User = Depends(get_admin_user),
+    db: Session = Depends(get_db),
 ):
     del current_user
-    return {"items": [], "total": 0, "page": page, "page_size": page_size}
+
+    normalized_keyword = (keyword or "").strip().lower()
+    normalized_crop = (crop_type or "").strip()
+    normalized_category = (category or "").strip()
+    query = select(KnowledgeItem)
+    if normalized_keyword:
+        query = query.where(
+            (KnowledgeItem.title.like(f"%{normalized_keyword}%"))
+            | (KnowledgeItem.disease_name.like(f"%{normalized_keyword}%"))
+            | (KnowledgeItem.tags_json.like(f"%{normalized_keyword}%"))
+        )
+    if normalized_crop:
+        query = query.where(KnowledgeItem.crop_type == normalized_crop)
+    if normalized_category:
+        query = query.where(KnowledgeItem.category == normalized_category)
+
+    total = db.scalar(select(func.count()).select_from(query.subquery())) or 0
+    rows = db.execute(
+        query.order_by(KnowledgeItem.updated_at.desc(), KnowledgeItem.id.desc())
+        .offset((page - 1) * page_size)
+        .limit(page_size)
+    ).scalars().all()
+    items = [
+        {
+            "id": item["id"],
+            "title": item["title"],
+            "disease_name": item["disease_name"],
+            "crop_type": item["crop_type"],
+            "category": item["category"],
+            "updated_at": item["updated_at"],
+            "tags": item["tags"],
+        }
+        for item in (knowledge_item_to_dict(row) for row in rows)
+    ]
+    return {"items": items, "total": total, "page": page, "page_size": page_size}
+
+
+@router.get("/configs")
+async def get_configs(
+    current_user: User = Depends(get_admin_user),
+    db: Session = Depends(get_db),
+):
+    del current_user
+    return {"items": list_system_configs(db)}
+
+
+@router.put("/configs")
+async def put_configs(
+    payload: ConfigsUpdatePayload,
+    current_user: User = Depends(get_admin_user),
+    db: Session = Depends(get_db),
+):
+    updated = update_system_configs(db, payload.values or {}, operator_id=current_user.id)
+    return {"items": updated}
+
+
+@router.get("/audit/permissions")
+async def list_permission_audit_logs(
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=200),
+    status_code: int | None = Query(None),
+    start_date: str | None = Query(None, description="开始日期 YYYY-MM-DD"),
+    end_date: str | None = Query(None, description="结束日期 YYYY-MM-DD"),
+    current_user: User = Depends(get_admin_user),
+    db: Session = Depends(get_db),
+):
+    del current_user
+    query = select(PermissionAuditLog)
+    if status_code in {401, 403}:
+        query = query.where(PermissionAuditLog.status_code == status_code)
+    if start_date:
+        start = datetime.strptime(start_date, "%Y-%m-%d")
+        query = query.where(PermissionAuditLog.created_at >= start)
+    if end_date:
+        end = datetime.strptime(end_date, "%Y-%m-%d").replace(hour=23, minute=59, second=59)
+        query = query.where(PermissionAuditLog.created_at <= end)
+
+    total = db.scalar(select(func.count()).select_from(query.subquery())) or 0
+    items = db.execute(
+        query.order_by(PermissionAuditLog.created_at.desc(), PermissionAuditLog.id.desc())
+        .offset((page - 1) * page_size)
+        .limit(page_size)
+    ).scalars().all()
+
+    return {
+        "items": [
+            {
+                "id": item.id,
+                "user_id": item.user_id,
+                "path": item.path,
+                "method": item.method,
+                "status_code": item.status_code,
+                "client_ip": item.client_ip,
+                "reason": item.reason,
+                "created_at": item.created_at.isoformat() if item.created_at else None,
+            }
+            for item in items
+        ],
+        "total": total,
+        "page": page,
+        "page_size": page_size,
+    }
+
+
+@router.get("/queue/metrics")
+async def get_queue_monitor_metrics(
+    current_user: User = Depends(get_admin_user),
+    db: Session = Depends(get_db),
+):
+    del current_user
+    return get_queue_metrics(db)

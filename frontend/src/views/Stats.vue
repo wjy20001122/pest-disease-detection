@@ -1,9 +1,6 @@
 <template>
   <div class="stats-page">
-    <div class="page-header">
-      <h1>检测统计</h1>
-      <p class="subtitle">病虫害检测数据分析</p>
-    </div>
+    <PageHeader title="检测统计" subtitle="按时间维度分析检测趋势与病虫害分布" />
 
     <div class="filter-section">
       <el-radio-group v-model="period" @change="fetchStats">
@@ -22,27 +19,9 @@
     </div>
 
     <div class="stats-overview">
-      <div class="stat-card">
-        <div class="stat-icon">📊</div>
-        <div class="stat-content">
-          <span class="stat-value">{{ stats.total || 0 }}</span>
-          <span class="stat-label">总检测次数</span>
-        </div>
-      </div>
-      <div class="stat-card">
-        <div class="stat-icon">🎯</div>
-        <div class="stat-content">
-          <span class="stat-value">{{ stats.avg_confidence || 0 }}</span>
-          <span class="stat-label">平均置信度</span>
-        </div>
-      </div>
-      <div class="stat-card">
-        <div class="stat-icon">⚠️</div>
-        <div class="stat-content">
-          <span class="stat-value">{{ stats.high_confidence_count || 0 }}</span>
-          <span class="stat-label">高置信度检测</span>
-        </div>
-      </div>
+      <MetricCard label="总检测次数" :value="stats.total || 0" :icon="DataLine" />
+      <MetricCard label="平均置信度" :value="stats.avg_confidence || 0" :icon="Aim" />
+      <MetricCard label="高置信度检测" :value="stats.high_confidence_count || 0" :icon="WarningFilled" />
     </div>
 
     <div class="charts-grid">
@@ -78,6 +57,9 @@
 import { ref, onMounted, nextTick } from 'vue'
 import * as echarts from 'echarts'
 import { detectionApi } from '@/api'
+import PageHeader from '@/components/ui/PageHeader.vue'
+import MetricCard from '@/components/ui/MetricCard.vue'
+import { Aim, DataLine, WarningFilled } from '@element-plus/icons-vue'
 
 const period = ref('month')
 const dateRange = ref([])
@@ -191,13 +173,7 @@ onMounted(() => {
 
 .filter-section { display: flex; gap: 16px; margin-bottom: 24px; align-items: center; }
 
-.stats-overview { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; margin-bottom: 24px; }
-.stat-card { display: flex; align-items: center; gap: 16px; padding: 20px; background: var(--bg-primary); border-radius: var(--radius-lg); border: 1px solid var(--border-light);
-  .stat-icon { font-size: 36px; }
-  .stat-content { display: flex; flex-direction: column; }
-  .stat-value { font-size: 28px; font-weight: 700; color: var(--primary); }
-  .stat-label { font-size: 14px; color: var(--text-secondary); }
-}
+.stats-overview { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-bottom: 24px; }
 
 .charts-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 16px; margin-bottom: 24px; }
 .chart-card { background: var(--bg-primary); border-radius: var(--radius-lg); border: 1px solid var(--border-light); padding: 20px;

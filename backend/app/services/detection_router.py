@@ -3,7 +3,10 @@ import asyncio
 import json
 from typing import Optional, Dict, Any, List
 from enum import Enum
+from sqlalchemy.orm import Session
 
+from app.core.config import settings
+from app.services.knowledge_service import search_knowledge_for_matching
 
 class DetectionSource(str, Enum):
     LOCAL_MODEL = "local_model"
@@ -46,7 +49,12 @@ class DetectionRouter:
     async def route_detection(
         self,
         image_url: str,
+        db: Session | None = None,
         preferred_model_key: Optional[str] = None,
+        crop_type: str | None = None,
+        category: str | None = None,
+        enforce_user_selection: bool = False,
+        skip_ai_routing: bool = False,
         use_local_model: bool = True,
         force_cloud_only: bool = False,
         allow_cloud_fallback: bool = True,
@@ -56,8 +64,108 @@ class DetectionRouter:
         """
         执行智能检测路由
         """
+        if not settings.enable_cloud_analysis:
+            allow_cloud_fallback = False
+            force_cloud_only = False
+
         local_result = None
         selected_model = preferred_model_key or "pest"
+        selection_context = {
+            "crop_type": (crop_type or "").strip(),
+            "category": (category or "").strip(),
+            "strict_selection": enforce_user_selection,
+        }
+
+        if skip_ai_routing:
+            local_result = await self._local_model_detect(image_url, selected_model)
+            local_result = self._normalize_local_result(local_result)
+            has_local_detection = (
+                local_result
+                and not local_result.get("error")
+                and local_result.get("labels")
+            )
+            if has_local_detection:
+                knowledge_hits = []
+                if db is not None:
+                    knowledge_hits = search_knowledge_for_matching(
+                        db,
+                        keyword=" ".join(local_result.get("labels", [])),
+                        crop_type=selection_context["crop_type"] or None,
+                        category=selection_context["category"] or None,
+                        limit=3,
+                    )
+                merged_result = self._merge_results(
+                    {
+                        "crop_type": selection_context["crop_type"],
+                        "category": selection_context["category"],
+                        "diseases": [
+                            {
+                                "name": label,
+                                "confidence": self._parse_confidence(local_result.get("confidences", [])[idx])
+                                if idx < len(local_result.get("confidences", [])) else 0.0,
+                            }
+                            for idx, label in enumerate(local_result.get("labels", []))
+                        ],
+                        "analysis_notes": "管理员直连模型模式（未使用AI路由）",
+                    },
+                    local_result,
+                    knowledge_hits[0] if knowledge_hits else None,
+                )
+                return {
+                    "source": DetectionSource.LOCAL_MODEL,
+                    "ai_analysis": {},
+                    "has_pest": True,
+                    "knowledge_match": knowledge_hits[0] if knowledge_hits else None,
+                    "knowledge_candidates": knowledge_hits,
+                    "local_detection": local_result,
+                    "matched_models": [selected_model],
+                    "confirmed_no_pest": False,
+                    "merged_result": merged_result,
+                    "maybe_unreliable": False,
+                    "confidence_notice": "admin_direct_local_model",
+                    "message": "管理员直连模型检测完成。",
+                }
+
+            return {
+                "source": DetectionSource.NO_PEST,
+                "ai_analysis": {},
+                "has_pest": False,
+                "knowledge_match": None,
+                "knowledge_candidates": [],
+                "local_detection": local_result,
+                "matched_models": [selected_model],
+                "confirmed_no_pest": False,
+                "maybe_unreliable": False,
+                "confidence_notice": "admin_direct_local_model",
+                "message": "本地模型未识别到有效结果（管理员直连模型模式）。",
+            }
+
+        ai_result = await self._cloud_ai_analyze(image_url, selection_context=selection_context)
+        if ai_result and isinstance(ai_result, dict):
+            ai_model_hint = str(ai_result.get("selected_model_key") or "").strip()
+            if ai_model_hint:
+                selected_model = ai_model_hint
+            if enforce_user_selection and not ai_result.get("error") and self._is_selection_conflicted(ai_result, selection_context):
+                return {
+                    "source": DetectionSource.CLOUD_AI,
+                    "ai_analysis": ai_result,
+                    "has_pest": False,
+                    "knowledge_match": None,
+                    "knowledge_candidates": [],
+                    "local_detection": None,
+                    "matched_models": [selected_model],
+                    "confirmed_no_pest": False,
+                    "merged_result": {
+                        "crop_type": selection_context["crop_type"],
+                        "category": selection_context["category"],
+                        "has_pest": False,
+                        "diseases": [],
+                        "analysis_notes": "图像特征与用户选择不一致，请调整作物或病虫害类别后重试。",
+                    },
+                    "maybe_unreliable": True,
+                    "confidence_notice": "selection_conflict",
+                    "message": "与用户选择不一致",
+                }
 
         if not force_cloud_only and use_local_model:
             local_result = await self._local_model_detect(image_url, selected_model)
@@ -70,21 +178,44 @@ class DetectionRouter:
             if has_local_detection:
                 ai_result = {}
                 if include_ai_advice:
-                    ai_result = await self._analyze_local_detection_with_ai(image_url, local_result)
+                    ai_result = await self._analyze_local_detection_with_ai(
+                        image_url,
+                        local_result,
+                        selection_context=selection_context,
+                    )
+                if db is not None:
+                    knowledge_hits = search_knowledge_for_matching(
+                        db,
+                        keyword=" ".join(local_result.get("labels", [])),
+                        crop_type=selection_context["crop_type"] or None,
+                        category=selection_context["category"] or None,
+                        limit=3,
+                    )
+                else:
+                    knowledge_hits = []
                 merged_result = self._merge_results(
                     ai_result or {
-                        "crop_type": "",
-                        "diseases": [],
+                        "crop_type": selection_context["crop_type"],
+                        "category": selection_context["category"],
+                        "diseases": [
+                            {
+                                "name": label,
+                                "confidence": self._parse_confidence(local_result.get("confidences", [])[idx])
+                                if idx < len(local_result.get("confidences", [])) else 0.0,
+                            }
+                            for idx, label in enumerate(local_result.get("labels", []))
+                        ],
                         "analysis_notes": "本次结果基于用户选择的本地模型",
                     },
                     local_result,
-                    None,
+                    knowledge_hits[0] if knowledge_hits else None,
                 )
                 return {
                     "source": DetectionSource.LOCAL_MODEL,
                     "ai_analysis": ai_result,
                     "has_pest": True,
-                    "knowledge_match": None,
+                    "knowledge_match": knowledge_hits[0] if knowledge_hits else None,
+                    "knowledge_candidates": knowledge_hits,
                     "local_detection": local_result,
                     "matched_models": [selected_model],
                     "confirmed_no_pest": False,
@@ -106,8 +237,6 @@ class DetectionRouter:
                 "confidence_notice": "local_model_only",
                 "message": "本地模型未识别到有效结果，且当前已禁用云端回退。",
             }
-
-        ai_result = await self._cloud_ai_analyze(image_url)
 
         if not ai_result or ai_result.get("error"):
             return {
@@ -142,10 +271,23 @@ class DetectionRouter:
         has_local_detection = local_result and not local_result.get("error") and local_result.get("labels")
 
         knowledge_match = None
+        knowledge_candidates: list[dict[str, Any]] = []
         confirmed_no_pest = False
 
         if not has_local_detection:
-            knowledge_match = await self._search_knowledge_by_ai_result(ai_result)
+            if db is not None:
+                ai_features = {}
+                top_disease = (ai_result.get("diseases") or [{}])[0]
+                ai_features["symptoms"] = str(top_disease.get("symptoms") or "")
+                knowledge_candidates = search_knowledge_for_matching(
+                    db,
+                    keyword=" ".join(ai_result.get("model_match_keywords", [])) or top_disease.get("name", ""),
+                    crop_type=selection_context["crop_type"] or None,
+                    category=selection_context["category"] or None,
+                    features=ai_features,
+                    limit=5,
+                )
+            knowledge_match = knowledge_candidates[0] if knowledge_candidates else None
 
             if not knowledge_match:
                 confirmed = await self._confirm_no_pest_with_ai(image_url, ai_result)
@@ -164,13 +306,39 @@ class DetectionRouter:
                         "confidence_notice": "cloud_fallback_limited_confidence",
                     }
 
+        if enforce_user_selection and self._is_selection_conflicted(ai_result, selection_context):
+            return {
+                "source": DetectionSource.CLOUD_AI,
+                "ai_analysis": ai_result,
+                "has_pest": False,
+                "knowledge_match": knowledge_match,
+                "knowledge_candidates": knowledge_candidates,
+                "local_detection": local_result,
+                "matched_models": [selected_model],
+                "confirmed_no_pest": False,
+                "merged_result": {
+                    "crop_type": selection_context["crop_type"],
+                    "category": selection_context["category"],
+                    "has_pest": False,
+                    "diseases": [],
+                    "analysis_notes": "图像特征与用户选择不一致，请调整作物或病虫害类别后重试。",
+                },
+                "maybe_unreliable": True,
+                "confidence_notice": "selection_conflict",
+                "message": "与用户选择不一致",
+            }
+
         merged_result = self._merge_results(ai_result, local_result, knowledge_match)
+        merged_result["category"] = selection_context["category"]
+        if selection_context["crop_type"]:
+            merged_result["crop_type"] = selection_context["crop_type"]
 
         return {
             "source": DetectionSource.LOCAL_MODEL if has_local_detection else DetectionSource.CLOUD_AI,
             "ai_analysis": ai_result,
             "has_pest": has_local_detection or has_pest_ai,
             "knowledge_match": knowledge_match,
+            "knowledge_candidates": knowledge_candidates,
             "local_detection": local_result,
             "matched_models": [selected_model],
             "confirmed_no_pest": confirmed_no_pest,
@@ -180,7 +348,11 @@ class DetectionRouter:
             "message": fallback_notice if not has_local_detection else "本地模型已完成检测。",
         }
 
-    async def _cloud_ai_analyze(self, image_url: str) -> Dict[str, Any]:
+    async def _cloud_ai_analyze(
+        self,
+        image_url: str,
+        selection_context: Dict[str, Any] | None = None,
+    ) -> Dict[str, Any]:
         """调用云端AI进行初步分析"""
         self._init_deepseek()
 
@@ -194,7 +366,10 @@ class DetectionRouter:
             }
 
         try:
-            result = await self.deepseek_service.analyze_image_url(image_url)
+            result = await self.deepseek_service.analyze_image_url(
+                image_url,
+                selection_context=selection_context,
+            )
             return result
         except Exception as e:
             return {
@@ -220,27 +395,8 @@ class DetectionRouter:
 
     async def _search_knowledge_by_ai_result(self, ai_result: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         """根据AI分析结果检索知识库"""
-        try:
-            from app.api.routers.knowledge import search_knowledge
-
-            keywords = ai_result.get("model_match_keywords", [])
-            diseases = ai_result.get("diseases", [])
-
-            for disease in diseases:
-                disease_name = disease.get("name", "")
-                if disease_name:
-                    results = search_knowledge(keyword=disease_name)
-                    if results:
-                        return results[0]
-
-            for keyword in keywords:
-                results = search_knowledge(keyword=keyword)
-                if results:
-                    return results[0]
-
-            return None
-        except Exception:
-            return None
+        del ai_result
+        return None
 
     def _match_pests_from_ai(self, ai_result: Dict[str, Any]) -> List[str]:
         """从AI分析结果中匹配本地支持的病虫害"""
@@ -388,8 +544,36 @@ class DetectionRouter:
             "detection_count": len(labels),
         }
 
-    async def _analyze_local_detection_with_ai(self, image_url: str, local_result: Dict[str, Any]) -> Dict[str, Any]:
+    async def _analyze_local_detection_with_ai(
+        self,
+        image_url: str,
+        local_result: Dict[str, Any],
+        selection_context: Dict[str, Any] | None = None,
+    ) -> Dict[str, Any]:
         context = self._local_context_for_ai(local_result)
+        if not settings.enable_cloud_analysis:
+            diseases = []
+            for item in context["summary"]:
+                conf = float(item.get("max_confidence") or 0.0)
+                diseases.append(
+                    {
+                        "name": item.get("name", "未知目标"),
+                        "confidence": conf,
+                        "severity": "high" if conf >= 0.8 else ("medium" if conf >= 0.5 else "low"),
+                        "symptoms": "本地模型检测到该病虫害目标，请结合检测框位置实地复核。",
+                        "possible_causes": "田间环境、虫源扩散或作物长势压力可能导致发生。",
+                        "prevention": "当前已禁用云端分析，建议结合知识库与农技规范制定防治方案。",
+                    }
+                )
+            return {
+                "crop_type": "",
+                "has_pest": len(diseases) > 0,
+                "no_pest_confidence": 0.0,
+                "diseases": diseases,
+                "model_match_keywords": context.get("labels", []),
+                "analysis_notes": "当前已禁用云端分析，建议基于本地检测结果自动生成。",
+            }
+
         self._init_deepseek()
 
         if not self.deepseek_service.api_key:
@@ -416,7 +600,11 @@ class DetectionRouter:
             }
 
         try:
-            result = await self.deepseek_service.analyze_with_detection_context(image_url, context)
+            result = await self.deepseek_service.analyze_with_detection_context(
+                image_url,
+                context,
+                selection_context=selection_context,
+            )
             if isinstance(result, dict):
                 result.setdefault("analysis_notes", "AI建议基于本地检测结构结果生成。")
                 result.setdefault("model_match_keywords", context.get("labels", []))
@@ -432,6 +620,28 @@ class DetectionRouter:
             "model_match_keywords": context.get("labels", []),
             "analysis_notes": "AI建议生成失败，已回退为本地检测结果。",
         }
+
+    def _is_selection_conflicted(
+        self,
+        ai_result: Dict[str, Any],
+        selection_context: Dict[str, Any],
+    ) -> bool:
+        crop_type = (selection_context.get("crop_type") or "").strip()
+        category = (selection_context.get("category") or "").strip()
+        if not crop_type and not category:
+            return False
+
+        ai_crop = str(ai_result.get("crop_type") or "").strip()
+        if crop_type and ai_crop and ai_crop != crop_type:
+            return True
+
+        if category:
+            diseases = ai_result.get("diseases", [])
+            if diseases:
+                inferred = str(diseases[0].get("category") or "").strip()
+                if inferred and inferred != category:
+                    return True
+        return False
 
     def _merge_results(
         self,
