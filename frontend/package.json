@@ -6,7 +6,10 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "e2e:seed": "cd ../backend && .venv/bin/python scripts/ensure_e2e_users.py",
+    "e2e": "npm run e2e:seed && playwright test",
+    "e2e:headed": "npm run e2e:seed && playwright test --headed"
   },
   "dependencies": {
     "@element-plus/icons-vue": "^2.3.0",
@@ -21,6 +24,7 @@
   },
   "devDependencies": {
     "@vitejs/plugin-vue": "^5.2.0",
+    "@playwright/test": "^1.54.2",
     "sass": "^1.80.0",
     "vite": "^6.0.0"
   }
