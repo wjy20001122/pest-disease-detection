@@ -40,8 +40,13 @@ def knowledge_item_to_dict(item: KnowledgeItem) -> dict[str, Any]:
         "conditions": item.conditions or "",
         "prevention": item.prevention or "",
         "tags": _safe_json_load_list(item.tags_json),
+        "source_type": item.source_type or "",
         "source_name": item.source_name or "",
         "source_url": item.source_url or "",
+        "book_title": item.book_title or "",
+        "publisher": item.publisher or "",
+        "publish_year": item.publish_year or "",
+        "chapter_ref": item.chapter_ref or "",
         "updated_at": item.updated_at.isoformat() if item.updated_at else None,
         "created_at": item.created_at.isoformat() if item.created_at else None,
     }
@@ -55,6 +60,10 @@ def list_knowledge_items(
     category: str | None = None,
     shape: str | None = None,
     color: str | None = None,
+    source_name: str | None = None,
+    source_type: str | None = None,
+    updated_from: str | None = None,
+    updated_to: str | None = None,
     page: int = 1,
     page_size: int = 10,
 ) -> tuple[list[dict[str, Any]], int]:
@@ -64,6 +73,8 @@ def list_knowledge_items(
     category = (category or "").strip()
     shape = (shape or "").strip()
     color = (color or "").strip()
+    source_name = (source_name or "").strip()
+    source_type = (source_type or "").strip()
 
     if keyword:
         like_kw = f"%{keyword}%"
@@ -73,6 +84,7 @@ def list_knowledge_items(
                 KnowledgeItem.disease_name.like(like_kw),
                 KnowledgeItem.symptoms.like(like_kw),
                 KnowledgeItem.tags_json.like(like_kw),
+                KnowledgeItem.source_name.like(like_kw),
             )
         )
 
@@ -84,6 +96,21 @@ def list_knowledge_items(
         query = query.where(KnowledgeItem.shape.like(f"%{shape}%"))
     if color:
         query = query.where(KnowledgeItem.color.like(f"%{color}%"))
+    if source_name:
+        query = query.where(KnowledgeItem.source_name.like(f"%{source_name}%"))
+    if source_type:
+        query = query.where(KnowledgeItem.source_type == source_type)
+    if updated_from:
+        try:
+            query = query.where(KnowledgeItem.updated_at >= datetime.strptime(updated_from, "%Y-%m-%d"))
+        except ValueError:
+            pass
+    if updated_to:
+        try:
+            end = datetime.strptime(updated_to, "%Y-%m-%d").replace(hour=23, minute=59, second=59)
+            query = query.where(KnowledgeItem.updated_at <= end)
+        except ValueError:
+            pass
 
     total = db.scalar(select(func.count()).select_from(query.subquery())) or 0
     rows = db.execute(
@@ -199,9 +226,15 @@ def search_knowledge_for_matching(
     return [knowledge_item_to_dict(item[1]) for item in scored[:limit]]
 
 
-def seed_knowledge_items(db: Session, payloads: list[dict[str, Any]]) -> int:
+def seed_knowledge_items(
+    db: Session,
+    payloads: list[dict[str, Any]],
+    *,
+    prune_missing: bool = False,
+) -> int:
     inserted = 0
     now = datetime.now()
+    incoming_keys: set[tuple[str, str, str]] = set()
     for payload in payloads:
         crop_type = str(payload.get("crop_type", "")).strip()
         category = str(payload.get("category", "")).strip()
@@ -212,6 +245,7 @@ def seed_knowledge_items(db: Session, payloads: list[dict[str, Any]]) -> int:
         disease_name = str(payload.get("disease_name") or "").strip()
         if not title or not disease_name:
             continue
+        incoming_keys.add((disease_name, crop_type, category))
 
         existing = db.execute(
             select(KnowledgeItem).where(
@@ -243,8 +277,13 @@ def seed_knowledge_items(db: Session, payloads: list[dict[str, Any]]) -> int:
             existing.conditions = str(payload.get("conditions") or "")
             existing.prevention = str(payload.get("prevention") or "")
             existing.tags_json = json.dumps(tags, ensure_ascii=False)
+            existing.source_type = str(payload.get("source_type") or "")
             existing.source_name = str(payload.get("source_name") or "")
             existing.source_url = str(payload.get("source_url") or "")
+            existing.book_title = str(payload.get("book_title") or "")
+            existing.publisher = str(payload.get("publisher") or "")
+            existing.publish_year = str(payload.get("publish_year") or "")
+            existing.chapter_ref = str(payload.get("chapter_ref") or "")
             existing.updated_at = updated_at
             continue
 
@@ -261,12 +300,30 @@ def seed_knowledge_items(db: Session, payloads: list[dict[str, Any]]) -> int:
                 conditions=str(payload.get("conditions") or ""),
                 prevention=str(payload.get("prevention") or ""),
                 tags_json=json.dumps(tags, ensure_ascii=False),
+                source_type=str(payload.get("source_type") or ""),
                 source_name=str(payload.get("source_name") or ""),
                 source_url=str(payload.get("source_url") or ""),
+                book_title=str(payload.get("book_title") or ""),
+                publisher=str(payload.get("publisher") or ""),
+                publish_year=str(payload.get("publish_year") or ""),
+                chapter_ref=str(payload.get("chapter_ref") or ""),
                 updated_at=updated_at,
                 created_at=now,
             )
         )
         inserted += 1
+
+    if prune_missing and incoming_keys:
+        existing_rows = db.execute(
+            select(KnowledgeItem).where(
+                KnowledgeItem.crop_type.in_(SUPPORTED_CROPS),
+                KnowledgeItem.category.in_(SUPPORTED_CATEGORIES),
+            )
+        ).scalars().all()
+        for row in existing_rows:
+            key = (row.disease_name, row.crop_type, row.category)
+            if key not in incoming_keys:
+                db.delete(row)
+
     db.commit()
     return inserted

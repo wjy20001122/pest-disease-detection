@@ -538,6 +538,8 @@ async def list_knowledge(
     keyword: str | None = Query(None),
     crop_type: str | None = Query(None),
     category: str | None = Query(None),
+    source_name: str | None = Query(None),
+    source_type: str | None = Query(None),
     current_user: User = Depends(get_admin_user),
     db: Session = Depends(get_db),
 ):
@@ -546,17 +548,25 @@ async def list_knowledge(
     normalized_keyword = (keyword or "").strip().lower()
     normalized_crop = (crop_type or "").strip()
     normalized_category = (category or "").strip()
+    normalized_source_name = (source_name or "").strip().lower()
+    normalized_source_type = (source_type or "").strip()
     query = select(KnowledgeItem)
     if normalized_keyword:
         query = query.where(
             (KnowledgeItem.title.like(f"%{normalized_keyword}%"))
             | (KnowledgeItem.disease_name.like(f"%{normalized_keyword}%"))
+            | (KnowledgeItem.symptoms.like(f"%{normalized_keyword}%"))
             | (KnowledgeItem.tags_json.like(f"%{normalized_keyword}%"))
+            | (KnowledgeItem.source_name.like(f"%{normalized_keyword}%"))
         )
     if normalized_crop:
         query = query.where(KnowledgeItem.crop_type == normalized_crop)
     if normalized_category:
         query = query.where(KnowledgeItem.category == normalized_category)
+    if normalized_source_name:
+        query = query.where(KnowledgeItem.source_name.like(f"%{normalized_source_name}%"))
+    if normalized_source_type:
+        query = query.where(KnowledgeItem.source_type == normalized_source_type)
 
     total = db.scalar(select(func.count()).select_from(query.subquery())) or 0
     rows = db.execute(
@@ -571,6 +581,13 @@ async def list_knowledge(
             "disease_name": item["disease_name"],
             "crop_type": item["crop_type"],
             "category": item["category"],
+            "source_type": item["source_type"],
+            "source_name": item["source_name"],
+            "source_url": item["source_url"],
+            "book_title": item["book_title"],
+            "publisher": item["publisher"],
+            "publish_year": item["publish_year"],
+            "chapter_ref": item["chapter_ref"],
             "updated_at": item["updated_at"],
             "tags": item["tags"],
         }

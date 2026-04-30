@@ -5,6 +5,7 @@ import json
 from pathlib import Path
 
 import app.db.models  # noqa: F401
+from app.db.bootstrap import ensure_knowledge_columns
 from app.db.session import Base, SessionLocal, engine
 from app.services.knowledge_service import seed_knowledge_items
 
@@ -28,10 +29,11 @@ def main() -> None:
         raise SystemExit("Seed file must be a JSON array")
 
     Base.metadata.create_all(bind=engine)
+    ensure_knowledge_columns()
 
     db = SessionLocal()
     try:
-        inserted = seed_knowledge_items(db, payloads)
+        inserted = seed_knowledge_items(db, payloads, prune_missing=True)
     finally:
         db.close()
 

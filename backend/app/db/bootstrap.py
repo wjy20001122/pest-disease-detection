@@ -17,6 +17,14 @@ HISTORY_INDEX_TARGETS = [
     ("camerarecords", "idx_camerarecords_username_start_time", "username, start_time"),
 ]
 
+KNOWLEDGE_EXTRA_COLUMNS = [
+    ("source_type", "VARCHAR(50)"),
+    ("book_title", "VARCHAR(255)"),
+    ("publisher", "VARCHAR(255)"),
+    ("publish_year", "VARCHAR(20)"),
+    ("chapter_ref", "VARCHAR(255)"),
+]
+
 
 def ensure_history_indexes() -> None:
     inspector = inspect(engine)
@@ -35,7 +43,25 @@ def ensure_history_indexes() -> None:
                 continue
 
 
+def ensure_knowledge_columns() -> None:
+    inspector = inspect(engine)
+    try:
+        columns = inspector.get_columns("knowledge_items")
+    except Exception:
+        return
+    existing = {item.get("name") for item in columns}
+    with engine.begin() as conn:
+        for column_name, column_type in KNOWLEDGE_EXTRA_COLUMNS:
+            if column_name in existing:
+                continue
+            try:
+                conn.execute(text(f"ALTER TABLE knowledge_items ADD COLUMN {column_name} {column_type}"))
+            except Exception:
+                continue
+
+
 def bootstrap_runtime_data() -> None:
+    ensure_knowledge_columns()
     db = SessionLocal()
     try:
         ensure_default_system_configs(db)

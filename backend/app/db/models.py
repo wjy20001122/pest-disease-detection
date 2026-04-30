@@ -230,8 +230,13 @@ class KnowledgeItem(Base):
     conditions = Column(Text, nullable=True)
     prevention = Column(Text, nullable=True)
     tags_json = Column(Text, nullable=True)
+    source_type = Column(String(50), nullable=True)
     source_name = Column(String(255), nullable=True)
     source_url = Column(String(500), nullable=True)
+    book_title = Column(String(255), nullable=True)
+    publisher = Column(String(255), nullable=True)
+    publish_year = Column(String(20), nullable=True)
+    chapter_ref = Column(String(255), nullable=True)
     updated_at = Column(DateTime, nullable=False, index=True)
     created_at = Column(DateTime, nullable=False)
 
