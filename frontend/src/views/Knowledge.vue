@@ -44,12 +44,12 @@
       </div>
     </section>
 
-    <section class="workspace">
-      <aside class="filter-panel card-lite" :class="{ collapsed: !showFilters }">
+    <section class="workspace" :class="{ 'drawer-mode': useDrawerFilters }">
+      <aside class="filter-panel card-lite" :class="{ collapsed: !showFilters, 'drawer-open': showFilterDrawer, 'drawer-panel': useDrawerFilters }">
         <div class="panel-header">
           <h3>筛选面板</h3>
-          <el-button text @click="showFilters = !showFilters">
-            {{ showFilters ? '收起' : '展开' }}
+          <el-button text @click="toggleFilterPanel">
+            {{ useDrawerFilters ? '关闭' : (showFilters ? '收起' : '展开') }}
           </el-button>
         </div>
 
@@ -125,6 +125,7 @@
             <span>共 {{ total }} 条</span>
           </div>
           <div class="toolbar-actions">
+            <el-button v-if="useDrawerFilters" :icon="Filter" @click="openFilterPanel">筛选</el-button>
             <el-radio-group v-model="viewMode" size="small">
               <el-radio-button label="card">卡片</el-radio-button>
               <el-radio-button label="list">列表</el-radio-button>
@@ -159,15 +160,35 @@
           </div>
 
           <div v-else-if="list.length && viewMode === 'list'" class="list-wrap">
+            <div class="list-head">
+              <span>病虫害条目</span>
+              <span>关键特征</span>
+              <span>来源与更新</span>
+            </div>
             <div v-for="item in list" :key="item.id" class="list-row" @click="viewDetail(item.id)">
               <div class="list-main">
                 <h4>{{ item.title }}</h4>
                 <p>{{ item.symptoms }}</p>
+                <div class="list-tags">
+                  <el-tag size="small" type="success">{{ item.crop_type }}</el-tag>
+                  <el-tag size="small" :type="item.category === '病害' ? 'danger' : 'warning'">{{ item.category }}</el-tag>
+                  <el-tag size="small" effect="plain">{{ sourceTypeText(item.source_type) }}</el-tag>
+                </div>
+              </div>
+              <div class="list-features">
+                <div class="feature-kv">
+                  <label>形状</label>
+                  <span>{{ item.shape || '-' }}</span>
+                </div>
+                <div class="feature-kv">
+                  <label>颜色</label>
+                  <span>{{ item.color || '-' }}</span>
+                </div>
               </div>
               <div class="list-side">
-                <span>{{ item.crop_type }} / {{ item.category }}</span>
-                <span>{{ sourceTypeText(item.source_type) }}</span>
+                <span class="source-name">{{ item.source_name || '未标注来源' }}</span>
                 <span class="muted">{{ formatDate(item.updated_at) }}</span>
+                <el-icon class="go-icon"><ArrowRightBold /></el-icon>
               </div>
             </div>
           </div>
@@ -196,53 +217,70 @@
     <el-drawer
       v-model="showDetail"
       title="知识详情"
-      size="560px"
+      :size="detailDrawerSize"
       :with-header="true"
     >
       <div v-if="current" class="detail-body">
-        <div class="detail-title">
-          <h3>{{ current.title }}</h3>
+        <section class="detail-hero">
+          <div class="detail-hero-head">
+            <p class="hero-caption">病虫害知识条目</p>
+            <h3>{{ current.title }}</h3>
+          </div>
           <div class="title-tags">
-            <el-tag type="success">{{ current.crop_type }}</el-tag>
-            <el-tag :type="current.category === '病害' ? 'danger' : 'warning'">{{ current.category }}</el-tag>
+            <el-tag effect="dark" type="success">{{ current.crop_type }}</el-tag>
+            <el-tag effect="dark" :type="current.category === '病害' ? 'danger' : 'warning'">{{ current.category }}</el-tag>
             <el-tag effect="plain">{{ sourceTypeText(current.source_type) }}</el-tag>
           </div>
-        </div>
+        </section>
 
-        <div class="detail-grid">
-          <div><label>形状</label><span>{{ current.shape || '-' }}</span></div>
-          <div><label>颜色</label><span>{{ current.color || '-' }}</span></div>
-          <div><label>大小</label><span>{{ current.size || '-' }}</span></div>
-          <div><label>更新</label><span>{{ formatDate(current.updated_at) }}</span></div>
-        </div>
+        <section class="detail-metrics">
+          <div class="metric-item">
+            <label>形状</label>
+            <span>{{ current.shape || '-' }}</span>
+          </div>
+          <div class="metric-item">
+            <label>颜色</label>
+            <span>{{ current.color || '-' }}</span>
+          </div>
+          <div class="metric-item">
+            <label>大小</label>
+            <span>{{ current.size || '-' }}</span>
+          </div>
+          <div class="metric-item">
+            <label>更新</label>
+            <span>{{ formatDate(current.updated_at) }}</span>
+          </div>
+        </section>
 
-        <section class="detail-section">
+        <section class="detail-section content-card">
           <h4>症状表现</h4>
           <p>{{ current.symptoms || '-' }}</p>
         </section>
-        <section class="detail-section">
+        <section class="detail-section content-card">
           <h4>发生条件</h4>
           <p>{{ current.conditions || '-' }}</p>
         </section>
-        <section class="detail-section">
+        <section class="detail-section content-card">
           <h4>防治建议</h4>
           <p>{{ current.prevention || '-' }}</p>
         </section>
 
-        <section class="detail-section">
+        <section class="detail-section content-card">
           <h4>标签</h4>
           <div class="tags">
             <el-tag v-for="tag in current.tags || []" :key="tag">{{ tag }}</el-tag>
           </div>
         </section>
 
-        <section class="detail-section source-card">
+        <section class="detail-section source-card content-card">
           <h4>来源信息</h4>
-          <p><strong>来源：</strong>{{ current.source_name || '-' }}</p>
-          <p v-if="current.book_title"><strong>书名：</strong>{{ current.book_title }}</p>
-          <p v-if="current.publisher"><strong>出版社：</strong>{{ current.publisher }}</p>
-          <p v-if="current.publish_year"><strong>出版年份：</strong>{{ current.publish_year }}</p>
-          <p v-if="current.chapter_ref"><strong>章节：</strong>{{ current.chapter_ref }}</p>
+          <div class="source-grid">
+            <div><label>来源</label><span>{{ current.source_name || '-' }}</span></div>
+            <div><label>书名</label><span>{{ current.book_title || '-' }}</span></div>
+            <div><label>出版社</label><span>{{ current.publisher || '-' }}</span></div>
+            <div><label>出版年份</label><span>{{ current.publish_year || '-' }}</span></div>
+            <div class="source-full"><label>章节</label><span>{{ current.chapter_ref || '-' }}</span></div>
+          </div>
           <div class="source-actions">
             <el-button size="small" :icon="CopyDocument" @click="copySource(current)">复制来源</el-button>
             <el-button
@@ -258,13 +296,14 @@
         </section>
       </div>
     </el-drawer>
+    <div v-if="useDrawerFilters && showFilterDrawer" class="drawer-mask" @click="showFilterDrawer = false" />
   </div>
 </template>
 
 <script setup>
-import { computed, onMounted, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { ElMessage } from 'element-plus'
-import { CopyDocument, Link, Reading, RefreshRight, Search } from '@element-plus/icons-vue'
+import { ArrowRightBold, CopyDocument, Filter, Link, Reading, RefreshRight, Search } from '@element-plus/icons-vue'
 import { knowledgeApi } from '@/api'
 import EmptyState from '@/components/ui/EmptyState.vue'
 import PageHeader from '@/components/ui/PageHeader.vue'
@@ -288,6 +327,7 @@ const updatedPreset = ref('all')
 const customDateRange = ref([])
 
 const showFilters = ref(true)
+const showFilterDrawer = ref(false)
 const viewMode = ref('card')
 const loading = ref(false)
 const list = ref([])
@@ -299,6 +339,16 @@ const colorOptions = ref([])
 
 const showDetail = ref(false)
 const current = ref(null)
+const windowWidth = ref(window.innerWidth)
+
+const isMobile = computed(() => windowWidth.value < 768)
+const isTablet = computed(() => windowWidth.value >= 768 && windowWidth.value < 1280)
+const useDrawerFilters = computed(() => windowWidth.value < 1280)
+const detailDrawerSize = computed(() => {
+  if (isMobile.value) return '96%'
+  if (isTablet.value) return '74%'
+  return '560px'
+})
 
 const pageTitle = computed(() => {
   const parts = []
@@ -363,12 +413,36 @@ function resetAllFilters() {
   updatedPreset.value = 'all'
   customDateRange.value = []
   page.value = 1
+  closeFilterDrawerIfNeeded()
   fetchData()
 }
 
 function handleSearch() {
   page.value = 1
+  closeFilterDrawerIfNeeded()
   fetchData()
+}
+
+function openFilterPanel() {
+  if (useDrawerFilters.value) {
+    showFilterDrawer.value = true
+    return
+  }
+  showFilters.value = true
+}
+
+function toggleFilterPanel() {
+  if (useDrawerFilters.value) {
+    showFilterDrawer.value = !showFilterDrawer.value
+    return
+  }
+  showFilters.value = !showFilters.value
+}
+
+function closeFilterDrawerIfNeeded() {
+  if (useDrawerFilters.value) {
+    showFilterDrawer.value = false
+  }
 }
 
 async function fetchFilters() {
@@ -445,9 +519,21 @@ function openSource(url) {
   window.open(url, '_blank')
 }
 
+function onResize() {
+  windowWidth.value = window.innerWidth
+  if (!useDrawerFilters.value) {
+    showFilterDrawer.value = false
+  }
+}
+
 onMounted(async () => {
+  window.addEventListener('resize', onResize)
   await fetchFilters()
   await fetchData()
+})
+
+onBeforeUnmount(() => {
+  window.removeEventListener('resize', onResize)
 })
 </script>
 
@@ -493,6 +579,10 @@ onMounted(async () => {
   gap: 12px;
 }
 
+.workspace.drawer-mode {
+  grid-template-columns: minmax(0, 1fr);
+}
+
 .filter-panel {
   padding: 12px;
   height: fit-content;
@@ -500,6 +590,23 @@ onMounted(async () => {
 
 .filter-panel.collapsed {
   min-height: 64px;
+}
+
+.filter-panel.drawer-panel {
+  position: fixed;
+  top: 0;
+  left: -320px;
+  width: min(86vw, 320px);
+  height: 100vh;
+  overflow: auto;
+  z-index: 42;
+  border-radius: 0 14px 14px 0;
+  box-shadow: var(--shadow-lg);
+  transition: left 0.2s ease;
+}
+
+.filter-panel.drawer-panel.drawer-open {
+  left: 0;
 }
 
 .panel-header {
@@ -630,31 +737,78 @@ onMounted(async () => {
   gap: 8px;
 }
 
+.list-head {
+  display: grid;
+  grid-template-columns: minmax(0, 1.2fr) minmax(0, 0.8fr) 190px;
+  gap: 12px;
+  padding: 0 12px 2px;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
 .list-row {
   border: 1px solid var(--border-light);
-  border-radius: 10px;
-  padding: 10px 12px;
+  border-radius: 12px;
+  padding: 12px;
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 220px;
+  grid-template-columns: minmax(0, 1.2fr) minmax(0, 0.8fr) 190px;
   gap: 12px;
   cursor: pointer;
-  transition: all 0.18s ease;
+  transition: all 0.2s ease;
+  background: var(--surface-0);
 }
 
 .list-row:hover {
   border-color: var(--primary);
-  background: color-mix(in srgb, var(--primary) 5%, var(--surface-0));
+  box-shadow: var(--shadow-sm);
+  transform: translateY(-1px);
 }
 
 .list-main h4 {
-  margin: 0 0 6px;
-  font-size: 14px;
+  margin: 0 0 8px;
+  font-size: 15px;
 }
 
 .list-main p {
   margin: 0;
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--text-secondary);
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.list-tags {
+  margin-top: 10px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.list-features {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 8px;
+}
+
+.feature-kv {
+  border: 1px solid var(--border-light);
+  border-radius: 8px;
+  padding: 8px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.feature-kv label {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.feature-kv span {
   font-size: 12px;
-  line-height: 1.5;
   color: var(--text-secondary);
 }
 
@@ -662,9 +816,19 @@ onMounted(async () => {
   display: flex;
   flex-direction: column;
   align-items: flex-end;
-  justify-content: center;
-  gap: 4px;
+  justify-content: space-between;
+  gap: 8px;
   font-size: 12px;
+}
+
+.source-name {
+  text-align: right;
+  color: var(--text-secondary);
+  line-height: 1.5;
+}
+
+.go-icon {
+  color: var(--primary);
 }
 
 .muted {
@@ -683,8 +847,23 @@ onMounted(async () => {
   gap: 14px;
 }
 
-.detail-title h3 {
-  margin: 0 0 8px;
+.detail-hero {
+  border: 1px solid var(--border-light);
+  border-radius: 12px;
+  padding: 12px;
+  background: linear-gradient(135deg, color-mix(in srgb, var(--primary) 12%, var(--surface-1)), var(--surface-1));
+}
+
+.detail-hero-head h3 {
+  margin: 2px 0 8px;
+  font-size: 18px;
+  line-height: 1.45;
+}
+
+.hero-caption {
+  margin: 0;
+  font-size: 12px;
+  color: var(--text-muted);
 }
 
 .title-tags {
@@ -693,29 +872,42 @@ onMounted(async () => {
   gap: 6px;
 }
 
-.detail-grid {
+.detail-metrics {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 10px;
-  border: 1px solid var(--border-light);
-  border-radius: 10px;
-  padding: 10px;
 }
 
-.detail-grid div {
+.metric-item {
   display: flex;
   flex-direction: column;
   gap: 4px;
+  border: 1px solid var(--border-light);
+  border-radius: 10px;
+  padding: 10px;
+  background: var(--surface-0);
 }
 
-.detail-grid label {
+.metric-item label {
   font-size: 12px;
   color: var(--text-muted);
+}
+
+.metric-item span {
+  font-size: 13px;
+}
+
+.content-card {
+  border: 1px solid var(--border-light);
+  border-radius: 12px;
+  padding: 12px;
+  background: var(--surface-0);
 }
 
 .detail-section h4 {
   margin: 0 0 6px;
   font-size: 14px;
+  color: var(--text-primary);
 }
 
 .detail-section p {
@@ -731,10 +923,30 @@ onMounted(async () => {
   flex-wrap: wrap;
 }
 
-.source-card {
-  border: 1px solid var(--border-light);
-  border-radius: 10px;
-  padding: 10px;
+.source-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.source-grid div {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.source-grid label {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.source-grid span {
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.source-full {
+  grid-column: 1 / -1;
 }
 
 .source-actions {
@@ -743,17 +955,28 @@ onMounted(async () => {
   gap: 8px;
 }
 
+.drawer-mask {
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.45);
+  z-index: 41;
+}
+
 @media (max-width: 1024px) {
-  .workspace {
-    grid-template-columns: 1fr;
+  .card-grid {
+    grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
   }
 
-  .filter-panel {
-    order: 1;
+  .list-head {
+    grid-template-columns: minmax(0, 1fr) 170px;
   }
 
-  .result-panel {
-    order: 2;
+  .list-row {
+    grid-template-columns: minmax(0, 1fr) 170px;
+  }
+
+  .list-features {
+    display: none;
   }
 }
 
@@ -762,12 +985,38 @@ onMounted(async () => {
     grid-template-columns: 1fr;
   }
 
+  .list-head {
+    display: none;
+  }
+
   .list-row {
     grid-template-columns: 1fr;
   }
 
   .list-side {
     align-items: flex-start;
+    border-top: 1px dashed var(--border-light);
+    padding-top: 8px;
+  }
+
+  .source-name {
+    text-align: left;
+  }
+
+  .detail-metrics,
+  .source-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .toolbar-actions {
+    width: 100%;
+    justify-content: space-between;
+    flex-wrap: wrap;
+  }
+
+  .result-toolbar {
+    align-items: flex-start;
+    flex-direction: column;
   }
 }
 </style>

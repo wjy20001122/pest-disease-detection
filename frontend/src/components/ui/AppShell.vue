@@ -34,15 +34,20 @@ defineProps({
 <style scoped lang="scss">
 .app-shell {
   display: flex;
-  min-height: 100vh;
+  height: 100vh;
   background: var(--surface-0);
+  overflow: hidden;
 }
 
 .shell-sidebar {
   width: var(--sidebar-width);
+  height: 100vh;
+  position: sticky;
+  top: 0;
   border-right: 1px solid var(--border-light);
   background: var(--surface-1);
   transition: width 0.2s ease;
+  overflow: hidden;
 }
 
 .app-shell.is-collapsed .shell-sidebar {
@@ -65,15 +70,18 @@ defineProps({
 
 .shell-main {
   flex: 1;
+  height: 100vh;
   min-width: 0;
   display: flex;
   flex-direction: column;
+  overflow: hidden;
 }
 
 .shell-topbar {
   position: sticky;
   top: 0;
   z-index: 20;
+  flex: 0 0 var(--topbar-height);
   height: var(--topbar-height);
   border-bottom: 1px solid var(--border-light);
   background: color-mix(in srgb, var(--surface-1) 92%, transparent);
@@ -82,8 +90,10 @@ defineProps({
 
 .workspace-content {
   flex: 1;
+  min-height: 0;
   padding: 16px 20px 20px;
-  overflow: auto;
+  overflow-x: hidden;
+  overflow-y: auto;
 }
 
 @media (max-width: 767px) {
