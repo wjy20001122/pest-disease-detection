@@ -13,7 +13,7 @@
 - 后端开发启动（可配合前端代理）：`cd backend && python3 -m uvicorn app.main:app --host 0.0.0.0 --port 8000`
 
 ## 运行注意事项（容易忽略）
-- `python backend/main.py` 使用的是 `backend/app/core/config.py` 里的 `settings.port`（默认 `9999`），与前端代理目标端口 `8000` 不一致。若运行 `main.py`，请设置 `FASTAPI_PORT=8000`。
+- `python backend/main.py` 使用 `backend/app/core/config.py` 中的 `settings.port`，当前默认已统一为 `8000`，与前端代理一致。
 - 后端启动时会在 `backend/app/main.py` 自动执行建表（`Base.metadata.create_all`）。
 - 仓库里有两套数据库/模型栈：
   - 主 API 栈：`backend/app/db/*`（同步 SQLAlchemy，引入于路由主链路）

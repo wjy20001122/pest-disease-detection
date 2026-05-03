@@ -18,7 +18,7 @@ load_dotenv(FASTAPI_ROOT / ".env", override=True)
 class Settings:
     app_name: str = os.getenv("FASTAPI_APP_NAME", "Corn Disease Detection FastAPI")
     host: str = os.getenv("FASTAPI_HOST", "0.0.0.0")
-    port: int = int(os.getenv("FASTAPI_PORT", "9999"))
+    port: int = int(os.getenv("FASTAPI_PORT", "8000"))
     db_host: str = os.getenv("DB_HOST", "139.129.37.65")
     db_port: int = int(os.getenv("DB_PORT", "3306"))
     db_name: str = os.getenv("DB_NAME", "cropdisease")
