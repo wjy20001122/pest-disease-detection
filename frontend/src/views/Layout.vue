@@ -3,7 +3,11 @@
     <template #sidebar>
       <div class="sidebar">
         <div class="logo-row">
-          <div class="logo-mark">CD</div>
+          <div class="logo-mark" aria-hidden="true">
+            <span class="stem"></span>
+            <span class="leaf leaf-a"></span>
+            <span class="leaf leaf-b"></span>
+          </div>
           <div v-if="!collapsed || isMobile" class="logo-text">
             <strong>Corn Detect</strong>
             <span>智能病虫害工作台</span>
@@ -17,8 +21,7 @@
               v-for="item in group.items"
               :key="item.name"
               :to="item.path"
-              class="nav-item"
-              active-class="active"
+              :class="['nav-item', { active: isMenuActive(item) }]"
               @click="handleNavClick"
             >
               <component :is="item.icon" class="item-icon" />
@@ -57,12 +60,6 @@
         </div>
 
         <div class="right">
-          <el-input
-            class="global-search"
-            placeholder="搜索（即将支持）"
-            :prefix-icon="Search"
-            disabled
-          />
           <el-button text @click="toggleTheme">
             <el-icon><component :is="theme === 'light' ? Moon : Sunny" /></el-icon>
           </el-button>
@@ -115,7 +112,6 @@ import {
   Moon,
   Odometer,
   Reading,
-  Search,
   Setting,
   Sunny,
   SwitchButton,
@@ -212,6 +208,14 @@ function handleNavClick() {
   }
 }
 
+function isMenuActive(item) {
+  if (!item?.path) return false
+  if (item.name === "Home") {
+    return route.path === "/"
+  }
+  return route.path === item.path || route.path.startsWith(`${item.path}/`)
+}
+
 function handleUserCommand(command) {
   if (command === 'settings') {
     router.push('/settings')
@@ -275,13 +279,43 @@ onBeforeUnmount(() => {
   width: 34px;
   height: 34px;
   border-radius: 10px;
-  background: linear-gradient(120deg, var(--primary), var(--primary-light));
-  color: #fff;
-  font-size: 12px;
-  font-weight: 700;
+  background: linear-gradient(145deg, #e8f3ff 0%, #dbeafe 100%);
+  border: 1px solid #bfd9ff;
   display: flex;
   align-items: center;
   justify-content: center;
+  position: relative;
+}
+
+.logo-mark .stem {
+  position: absolute;
+  left: 50%;
+  bottom: 7px;
+  transform: translateX(-50%);
+  width: 4px;
+  height: 15px;
+  border-radius: 99px;
+  background: linear-gradient(180deg, #0ea5a4 0%, #1663c7 100%);
+}
+
+.logo-mark .leaf {
+  position: absolute;
+  width: 10px;
+  height: 5px;
+  border-radius: 8px 8px 8px 2px;
+  background: linear-gradient(120deg, #16a34a, #0f766e);
+}
+
+.logo-mark .leaf-a {
+  left: 9px;
+  bottom: 9px;
+  transform: rotate(-28deg);
+}
+
+.logo-mark .leaf-b {
+  left: 15px;
+  bottom: 13px;
+  transform: rotate(26deg);
 }
 
 .logo-text {
@@ -387,10 +421,6 @@ onBeforeUnmount(() => {
   font-size: 12px;
 }
 
-.global-search {
-  width: 200px;
-}
-
 .notify-btn {
   width: 32px;
   height: 32px;
@@ -446,10 +476,6 @@ onBeforeUnmount(() => {
 }
 
 @media (max-width: 767px) {
-  .global-search {
-    display: none;
-  }
-
   .route-meta h1 {
     font-size: 14px;
   }

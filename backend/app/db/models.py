@@ -21,6 +21,21 @@ class User(Base):
     time = Column(DateTime)
 
 
+class EmailVerificationCode(Base):
+    __tablename__ = "email_verification_codes"
+    __table_args__ = (
+        Index("idx_email_code_email_purpose", "email", "purpose"),
+    )
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    email = Column(String(255), nullable=False)
+    purpose = Column(String(32), nullable=False)
+    code_hash = Column(String(128), nullable=False)
+    is_used = Column(Integer, nullable=False, default=0)
+    expires_at = Column(DateTime, nullable=False)
+    created_at = Column(DateTime, nullable=False)
+
+
 class ImgRecord(Base):
     __tablename__ = "imgrecords"
     __table_args__ = (

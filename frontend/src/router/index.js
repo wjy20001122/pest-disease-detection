@@ -38,10 +38,16 @@ const routes = [
         meta: { title: '检测历史', group: 'workspace', icon: 'Document' }
       },
       {
+        path: 'history/:id',
+        name: 'HistoryDetail',
+        component: () => import('@/views/HistoryDetail.vue'),
+        meta: { title: '检测详情' }
+      },
+      {
         path: 'tracking',
         name: 'Tracking',
         component: () => import('@/views/Tracking.vue'),
-        meta: { title: '虫害跟踪', group: 'workspace', icon: 'Location' }
+        meta: { requiresAdmin: true, title: '虫害跟踪', group: 'workspace', icon: 'Location' }
       },
       {
         path: 'knowledge',

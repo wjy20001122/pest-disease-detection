@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, Query, Request
 from app.services.environment_service import environment_service
 
 router = APIRouter(prefix="/environment", tags=["环境数据"])
@@ -40,6 +40,11 @@ async def get_current_environment(
         "latitude": env_data.latitude,
         "longitude": env_data.longitude,
         "address": env_data.address,
+        "province": env_data.province,
+        "city": env_data.city,
+        "district": env_data.district,
+        "county": env_data.county,
+        "township": env_data.township,
         "weather": env_data.weather,
         "temperature": env_data.temperature,
         "humidity": env_data.humidity,
@@ -82,4 +87,28 @@ async def submit_manual_environment(
         "temperature": env_data.temperature,
         "humidity": env_data.humidity,
         "status": "success"
+    }
+
+
+@router.get("/ip-current")
+async def get_ip_environment(request: Request):
+    """通过请求IP推断当前位置与天气（定位权限失败时兜底）"""
+    client_ip = request.client.host if request.client else ""
+    env_data = await environment_service.get_environment_by_ip(client_ip=client_ip)
+    return {
+        "latitude": env_data.latitude,
+        "longitude": env_data.longitude,
+        "address": env_data.address,
+        "province": env_data.province,
+        "city": env_data.city,
+        "district": env_data.district,
+        "county": env_data.county,
+        "township": env_data.township,
+        "weather": env_data.weather,
+        "temperature": env_data.temperature,
+        "humidity": env_data.humidity,
+        "wind_speed": env_data.wind_speed,
+        "pressure": env_data.pressure,
+        "visibility": env_data.visibility,
+        "recorded_at": env_data.recorded_at
     }

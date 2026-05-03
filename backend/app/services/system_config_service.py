@@ -18,6 +18,7 @@ DEFAULT_SYSTEM_CONFIGS: dict[str, Any] = {
     "video_task_hard_time_limit_sec": settings.celery_video_task_hard_time_limit_sec,
     "video_task_max_retries": settings.celery_video_task_max_retries,
     "video_task_retry_backoff_sec": settings.celery_video_task_retry_backoff_sec,
+    "video_task_queued_timeout_sec": 60,
     "queue_backlog_warn_threshold": 20,
     "queue_backlog_critical_threshold": 50,
 }
@@ -30,6 +31,7 @@ CONFIG_VALUE_TYPE: dict[str, type] = {
     "video_task_hard_time_limit_sec": int,
     "video_task_max_retries": int,
     "video_task_retry_backoff_sec": int,
+    "video_task_queued_timeout_sec": int,
     "queue_backlog_warn_threshold": int,
     "queue_backlog_critical_threshold": int,
 }

@@ -1,12 +1,18 @@
 <template>
   <div class="qna-page">
     <PageHeader title="智能问答" subtitle="基于知识库与检测上下文的辅助问答" />
-    <div class="qna-layout">
-      <!-- 对话历史列表 -->
-      <aside class="history-sidebar">
+
+    <div class="qna-toolbar">
+      <el-button plain size="small" @click="toggleHistory">
+        {{ historyCollapsed ? '显示对话历史' : '隐藏对话历史' }}
+      </el-button>
+      <el-button size="small" type="primary" @click="startNewChat">+ 新对话</el-button>
+    </div>
+
+    <div class="qna-layout" :class="{ collapsed: historyCollapsed }">
+      <aside v-show="!historyCollapsed" class="history-sidebar">
         <div class="sidebar-header">
           <h3>对话历史</h3>
-          <el-button size="small" @click="startNewChat">+ 新对话</el-button>
         </div>
         <div class="history-list">
           <div
@@ -19,21 +25,23 @@
             <span class="chat-title">{{ chat.title || '新对话' }}</span>
             <span class="chat-time">{{ formatTime(chat.updated_at) }}</span>
           </div>
+          <div v-if="!conversations.length" class="history-empty">暂无历史对话</div>
         </div>
       </aside>
 
-      <!-- 聊天主区域 -->
       <main class="chat-main">
         <div class="chat-header">
-          <h2>{{ currentConversationId ? '继续对话' : '病虫害智能问答' }}</h2>
-          <p class="chat-intro">基于知识库的智能问答助手，结合 DeepSeek AI 分析</p>
+          <div class="chat-title-wrap">
+            <h2>{{ currentConversationId ? '继续对话' : '病虫害智能问答' }}</h2>
+            <p class="chat-intro">基于知识库与 DeepSeek AI 的约束分析助手</p>
+          </div>
           <div class="filter-row">
-            <el-select v-model="cropType" placeholder="作物类型" clearable size="small" style="width: 100px;">
+            <el-select v-model="cropType" placeholder="作物类型" clearable size="small" style="width: 110px;">
               <el-option label="玉米" value="玉米" />
               <el-option label="小麦" value="小麦" />
               <el-option label="水稻" value="水稻" />
             </el-select>
-            <el-select v-model="category" placeholder="类别" clearable size="small" style="width: 80px;">
+            <el-select v-model="category" placeholder="病害/虫害" clearable size="small" style="width: 110px;">
               <el-option label="虫害" value="虫害" />
               <el-option label="病害" value="病害" />
             </el-select>
@@ -44,16 +52,12 @@
           <div v-if="!messages.length && !loading" class="welcome-message">
             <div class="welcome-icon">💬</div>
             <h3>您好，我是病虫害智能问答助手</h3>
-            <p>我可以帮您解答以下问题：</p>
-            <ul>
-              <li>病虫害的识别和诊断</li>
-              <li>病虫害的防治方法和用药建议</li>
-              <li>作物病害的发生条件和传播途径</li>
-              <li>农业技术咨询和种植建议</li>
-            </ul>
+            <p>我可以帮您解答病虫害识别、防治和种植管理问题</p>
             <div class="quick-questions">
-              <span>试试这样问：</span>
-              <el-button v-for="q in quickQuestions" :key="q" size="small" @click="sendMessage(q)">{{ q }}</el-button>
+              <span>快速提问：</span>
+              <el-button v-for="q in quickQuestions" :key="q" size="small" @click="sendMessage(q)">
+                {{ q }}
+              </el-button>
             </div>
           </div>
 
@@ -63,7 +67,13 @@
               <div class="message-text" v-html="formatMessage(msg.content)"></div>
               <div v-if="msg.sources?.length" class="message-sources">
                 <span class="sources-label">📚 参考来源：</span>
-                <el-tag v-for="source in msg.sources" :key="source.id" size="small" class="source-tag" @click="viewSource(source)">
+                <el-tag
+                  v-for="source in msg.sources"
+                  :key="source.id"
+                  size="small"
+                  class="source-tag"
+                  @click="viewSource(source)"
+                >
                   {{ source.disease_name || source.title }}
                   <span class="source-meta">{{ source.crop_type }} {{ source.category }}</span>
                 </el-tag>
@@ -129,12 +139,17 @@ const cropType = ref('')
 const category = ref('')
 const sendError = ref('')
 const lastFailedQuestion = ref('')
+const historyCollapsed = ref(false)
 
 const quickQuestions = [
   '水稻叶片发黄是什么原因？',
   '如何防治稻飞虱？',
   '纹枯病的最佳防治时间是什么时候？'
 ]
+
+function toggleHistory() {
+  historyCollapsed.value = !historyCollapsed.value
+}
 
 function formatTime(time) {
   if (!time) return ''
@@ -144,7 +159,6 @@ function formatTime(time) {
 
 function formatMessage(content) {
   if (!content) return ''
-  // 处理换行和基本格式
   return content
     .replace(/\n/g, '<br>')
     .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
@@ -205,15 +219,14 @@ async function sendMessage(text, options = { isRetry: false }) {
       crop_type: cropType.value || undefined,
       category: category.value || undefined
     })
-    
-    // 添加助手回复
+
     messages.value.push({
       role: 'assistant',
       content: res.answer,
       sources: res.sources || [],
       created_at: new Date().toISOString()
     })
-    
+
     if (res.conversation_id) {
       currentConversationId.value = res.conversation_id
       fetchConversations()
@@ -234,7 +247,6 @@ function retryLastQuestion() {
 }
 
 function viewSource(source) {
-  // 跳转到知识详情
   window.open(`/knowledge/${source.id}`, '_blank')
 }
 
@@ -249,77 +261,313 @@ function scrollToBottom() {
 watch(messages, () => scrollToBottom(), { deep: true })
 
 onMounted(() => {
+  if (window.innerWidth < 992) {
+    historyCollapsed.value = true
+  }
   fetchConversations()
 })
 </script>
 
-<style lang="scss" scoped>
-.qna-page { height: calc(100vh - 140px); display: flex; flex-direction: column; gap: 12px; }
+<style scoped lang="scss">
+.qna-page {
+  height: calc(100vh - 140px);
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
 
-.qna-layout { display: flex; width: 100%; gap: 24px; }
+.qna-toolbar {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.qna-layout {
+  display: grid;
+  grid-template-columns: 280px minmax(0, 1fr);
+  gap: 12px;
+  min-height: 0;
+  flex: 1;
+}
+
+.qna-layout.collapsed {
+  grid-template-columns: minmax(0, 1fr);
+}
 
 .history-sidebar {
-  width: 280px; flex-shrink: 0;
-  background: var(--bg-primary); border-radius: var(--radius-lg); padding: 16px;
-  display: flex; flex-direction: column;
+  border: 1px solid var(--border-light);
+  background: var(--surface-1);
+  border-radius: var(--radius-lg);
+  padding: 14px;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
 }
-.sidebar-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; h3 { margin: 0; font-size: 16px; } }
-.history-list { flex: 1; overflow-y: auto; }
+
+.sidebar-header h3 {
+  margin: 0 0 10px;
+  font-size: 16px;
+}
+
+.history-list {
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
 .history-item {
-  padding: 12px; border-radius: var(--radius-md); cursor: pointer; margin-bottom: 4px;
-  transition: all 0.2s;
-  &:hover { background: var(--bg-secondary); }
-  &.active { background: var(--primary); color: white; }
-  .chat-title { display: block; font-size: 14px; margin-bottom: 4px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .chat-time { font-size: 12px; opacity: 0.7; }
+  border: 1px solid var(--border-light);
+  border-radius: var(--radius-md);
+  padding: 10px;
+  cursor: pointer;
+  transition: all .2s;
+}
+
+.history-item:hover {
+  border-color: var(--primary);
+}
+
+.history-item.active {
+  background: rgba(59, 130, 246, 0.12);
+  border-color: var(--primary);
+}
+
+.chat-title {
+  display: block;
+  font-size: 14px;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chat-time {
+  display: block;
+  font-size: 12px;
+  margin-top: 4px;
+  color: var(--text-secondary);
+}
+
+.history-empty {
+  font-size: 12px;
+  color: var(--text-muted);
+  padding: 8px 2px;
 }
 
 .chat-main {
-  flex: 1; display: flex; flex-direction: column;
-  background: var(--bg-primary); border-radius: var(--radius-lg); overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--border-light);
+  background: var(--surface-1);
+  border-radius: var(--radius-lg);
+  min-height: 0;
+  overflow: hidden;
 }
-.chat-header { padding: 20px 24px; border-bottom: 1px solid var(--border-light); h2 { margin: 0 0 8px; font-size: 18px; } .chat-intro { margin: 0 0 12px; font-size: 14px; color: var(--text-secondary); } .filter-row { display: flex; gap: 8px; } }
 
-.messages-container { flex: 1; overflow-y: auto; padding: 24px; }
+.chat-header {
+  padding: 16px;
+  border-bottom: 1px solid var(--border-light);
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.chat-title-wrap h2 {
+  margin: 0 0 4px;
+  font-size: 20px;
+}
+
+.chat-intro {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: 13px;
+}
+
+.filter-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.messages-container {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 16px;
+}
 
 .welcome-message {
-  text-align: center; padding: 48px 24px;
-  .welcome-icon { font-size: 64px; margin-bottom: 24px; }
-  h3 { margin: 0 0 16px; font-size: 20px; }
-  p { color: var(--text-secondary); margin-bottom: 16px; }
-  ul { text-align: left; max-width: 400px; margin: 0 auto 24px; color: var(--text-secondary); li { margin-bottom: 8px; } }
+  text-align: center;
+  padding: 24px 16px;
 }
-.quick-questions { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; align-items: center; span { font-size: 14px; color: var(--text-muted); } }
+
+.welcome-icon {
+  font-size: 48px;
+}
+
+.welcome-message h3 {
+  margin: 10px 0 8px;
+}
+
+.welcome-message p {
+  margin: 0;
+  color: var(--text-secondary);
+}
+
+.quick-questions {
+  margin-top: 12px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: center;
+}
+
+.quick-questions span {
+  font-size: 13px;
+  color: var(--text-secondary);
+  align-self: center;
+}
 
 .message-item {
-  display: flex; gap: 12px; margin-bottom: 24px;
-  &.user { flex-direction: row-reverse; .message-content { align-items: flex-end; } }
-  &.assistant { .message-avatar { background: var(--primary); } }
+  display: flex;
+  gap: 10px;
+  margin-bottom: 16px;
 }
-.message-avatar { width: 36px; height: 36px; border-radius: 50%; background: var(--bg-secondary); display: flex; align-items: center; justify-content: center; font-size: 18px; flex-shrink: 0; }
-.message-content { max-width: 70%; }
-.message-text { background: var(--bg-secondary); padding: 12px 16px; border-radius: var(--radius-lg); line-height: 1.6; font-size: 14px; }
-.message-sources { margin-top: 8px; padding: 8px 12px; background: rgba(16, 185, 129, 0.1); border-radius: var(--radius-sm); .sources-label { font-size: 12px; color: var(--text-muted); margin-right: 8px; } .source-tag { cursor: pointer; margin-right: 4px; display: flex; gap: 4px; align-items: center; .source-meta { font-size: 11px; opacity: 0.7; } } }
-.message-time { font-size: 11px; color: var(--text-muted); margin-top: 4px; }
-.user .message-text { background: var(--primary); color: white; }
 
-.typing-indicator { display: flex; gap: 4px; padding: 12px 16px; span { width: 8px; height: 8px; background: var(--text-muted); border-radius: 50%; animation: typing 1.4s infinite; &:nth-child(2) { animation-delay: 0.2s; } &:nth-child(3) { animation-delay: 0.4s; } } }
-@keyframes typing { 0%, 60%, 100% { transform: translateY(0); } 30% { transform: translateY(-8px); } }
+.message-item.user {
+  flex-direction: row-reverse;
+}
+
+.message-avatar {
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  background: var(--surface-2);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.message-content {
+  max-width: min(78%, 700px);
+}
+
+.message-text {
+  border-radius: 12px;
+  padding: 10px 12px;
+  line-height: 1.7;
+  background: var(--surface-2);
+  font-size: 14px;
+  color: var(--text-primary);
+}
+
+.user .message-text {
+  background: var(--primary);
+  color: #fff;
+}
+
+.message-time {
+  font-size: 11px;
+  margin-top: 4px;
+  color: var(--text-muted);
+}
+
+.message-sources {
+  margin-top: 6px;
+  padding: 8px;
+  border-radius: var(--radius-sm);
+  background: rgba(16, 185, 129, 0.08);
+}
+
+.sources-label {
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.source-tag {
+  margin-top: 6px;
+  margin-right: 6px;
+  cursor: pointer;
+}
+
+.source-meta {
+  font-size: 11px;
+  opacity: 0.7;
+  margin-left: 4px;
+}
+
+.typing-indicator {
+  display: flex;
+  gap: 4px;
+  padding: 10px 12px;
+}
+
+.typing-indicator span {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--text-muted);
+  animation: typing 1.4s infinite;
+}
+
+.typing-indicator span:nth-child(2) {
+  animation-delay: .2s;
+}
+
+.typing-indicator span:nth-child(3) {
+  animation-delay: .4s;
+}
+
+@keyframes typing {
+  0%, 60%, 100% { transform: translateY(0); }
+  30% { transform: translateY(-6px); }
+}
 
 .inline-error-card {
-  margin: 12px 0;
-  padding: 12px;
+  margin-top: 8px;
   border: 1px solid var(--border-light);
   border-radius: var(--radius-md);
-  background: var(--bg-secondary);
+  padding: 10px;
 }
 
 .error-actions {
-  margin-top: 10px;
+  margin-top: 8px;
   display: flex;
   gap: 8px;
 }
 
-.input-area { padding: 16px 24px; border-top: 1px solid var(--border-light); }
-.input-actions { display: flex; justify-content: space-between; align-items: center; margin-top: 8px; .hint { font-size: 12px; color: var(--text-muted); } }
+.input-area {
+  padding: 12px 16px;
+  border-top: 1px solid var(--border-light);
+}
+
+.input-actions {
+  margin-top: 8px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.hint {
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+@media (max-width: 991px) {
+  .qna-page {
+    height: auto;
+    min-height: calc(100vh - 140px);
+  }
+
+  .chat-header {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .message-content {
+    max-width: 88%;
+  }
+}
 </style>

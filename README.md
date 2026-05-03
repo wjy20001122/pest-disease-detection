@@ -1,36 +1,71 @@
-# Pest Disease Detection
+# Pest Disease Detection（病虫害检测系统）
 
-Pest Disease Detection is a full-stack project for agricultural pest and disease detection, with a FastAPI backend and a Vue 3 frontend.
+更新时间：2026-05-03
 
-## Project Structure
+一个基于 `FastAPI + Vue3 + Element Plus + Celery/Redis` 的农业病虫害检测平台，支持普通用户与管理员分级能力：
 
-- `backend/`: FastAPI API, ML inference code, and service integrations
-- `frontend/`: Vue 3 + Vite web application
-- `scripts/`: database initialization and utility scripts
-- `deploy/`: deployment-related files
+- 普通用户：图像检测（AI 约束分析）
+- 管理员：图像/视频/摄像头检测（本地模型直连 + 异步任务）
 
-## Quick Start
+---
 
-### Backend
+## 项目结构
+
+- `backend/`：FastAPI 主服务、数据库模型、业务服务、Celery 任务
+- `frontend/`：Vue3 + Vite 前端工作台
+- `deploy/`：宝塔部署脚本、PM2 与 Nginx 配置
+- `backend/scripts/`：回归脚本、发布前检查、数据导入脚本
+
+---
+
+## 核心功能
+
+- 检测中心：图像/视频/摄像头（按角色展示）
+- 视频异步：Celery + Redis + `video_tasks` 状态持久化
+- 知识库：MySQL 持久化，支持检索、筛选、详情、来源元数据
+- 智能问答：会话持久化，失败明确错误态，支持作物/类别约束
+- 管理后台：用户、通知、模型、配置、权限审计、队列指标
+- 工作台：7 天天气可视化 + 检测统计总览
+
+---
+
+## 本地开发启动
+
+### 1) 启动后端（8000）
 
 ```bash
 cd backend
-python -m venv .venv
+python3 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
-uvicorn app.main:app --reload
+python3 -m uvicorn app.main:app --host 0.0.0.0 --port 8000
+```
+
+### 2) 启动 Celery Worker（视频检测必需）
+
+```bash
+cd backend
+source .venv/bin/activate
 celery -A app.tasks.celery_app.celery_app worker --loglevel=INFO --pool=threads --concurrency=1
 ```
 
-### Frontend
+### 3) 启动前端 Dev（3000）
 
 ```bash
 cd frontend
 npm install
-npm run dev
+npm run dev -- --host 0.0.0.0 --port 3000
 ```
 
-## Environment
+---
 
-Copy `backend/.env.example` to `backend/.env` and fill in the required values before running the backend.
-For video async detection, make sure Redis and Celery worker are running.
+## 环境变量
+
+复制 `backend/.env.example` 为 `backend/.env`，至少配置：
+
+- MySQL：`DB_HOST/DB_PORT/DB_NAME/DB_USERNAME/DB_PASSWORD`
+- Redis/Celery：`REDIS_URL/CELERY_BROKER_URL/CELERY_RESULT_BACKEND`
+- 地图天气（可选增强）：`MAP_API_KEY/WEATHER_API_KEY`
+- AI（可选增强）：`DEEPSEEK_API_KEY`
+
+> 未启动 Redis/Celery 时，视频任务会按当前设计快速失败并返回明确错误。

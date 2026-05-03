@@ -60,6 +60,14 @@ class Settings:
     celery_video_task_hard_time_limit_sec: int = int(os.getenv("CELERY_VIDEO_TASK_HARD_TIME_LIMIT_SEC", "2100"))
     celery_video_task_max_retries: int = int(os.getenv("CELERY_VIDEO_TASK_MAX_RETRIES", "2"))
     celery_video_task_retry_backoff_sec: int = int(os.getenv("CELERY_VIDEO_TASK_RETRY_BACKOFF_SEC", "30"))
+    smtp_host: str = os.getenv("SMTP_HOST", "").strip()
+    smtp_port: int = int(os.getenv("SMTP_PORT", "465"))
+    smtp_user: str = os.getenv("SMTP_USER", "").strip()
+    smtp_password: str = os.getenv("SMTP_PASSWORD", "").strip()
+    smtp_from_email: str = os.getenv("SMTP_FROM_EMAIL", "").strip()
+    smtp_use_ssl: bool = os.getenv("SMTP_USE_SSL", "true").strip().lower() in {"1", "true", "yes", "on"}
+    email_code_expire_minutes: int = int(os.getenv("EMAIL_CODE_EXPIRE_MINUTES", "10"))
+    email_code_cooldown_seconds: int = int(os.getenv("EMAIL_CODE_COOLDOWN_SECONDS", "60"))
 
     @property
     def database_url(self) -> str:

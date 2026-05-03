@@ -17,18 +17,19 @@
       <div v-for="item in list" :key="item.id" class="history-item card">
         <div class="item-header">
           <span class="type-tag">{{ typeMap[item.detection_type || item.type] }}</span>
-          <span class="source-tag" :class="item.source">{{ item.source === 'local_model' ? '本地模型' : '云端AI' }}</span>
+          <span class="source-tag" :class="resolveSource(item)">{{ resolveSourceLabel(item) }}</span>
         </div>
         <div class="item-body">
-          <div class="disease-name">{{ item.disease_name || '未检测到病虫害' }}</div>
+          <div class="disease-name">{{ resolveDiseaseName(item) }}</div>
           <div class="item-info">
-            <span v-if="item.confidence">置信度 {{ (item.confidence * 100).toFixed(1) }}%</span>
+            <span v-if="resolveConfidence(item) !== null">置信度 {{ resolveConfidence(item) }}</span>
             <span v-if="item.severity" class="severity" :class="item.severity">{{ severityMap[item.severity] }}</span>
+            <span v-if="resolveDetectionCount(item) > 0">检测数量 {{ resolveDetectionCount(item) }}</span>
           </div>
         </div>
         <div class="item-footer">
           <span class="time">{{ formatTime(item.created_at) }}</span>
-          <button class="btn-detail" @click="viewDetail(item.id)">查看详情 →</button>
+          <button class="btn-detail" @click="viewDetail(item.id, item.detection_type || item.type)">查看详情 →</button>
         </div>
       </div>
     </div>
@@ -60,6 +61,80 @@ const filter = reactive({ type: '', date_from: '', date_to: '', keyword: '' })
 const typeMap = { image: '图像', video: '视频', camera: '摄像头' }
 const severityMap = { high: '严重', medium: '中等', low: '轻微' }
 
+function parseJsonField(value, fallback) {
+  if (!value) return fallback
+  if (typeof value === 'object') return value
+  try {
+    return JSON.parse(value)
+  } catch {
+    return fallback
+  }
+}
+
+function resolveSource(item) {
+  const source = item?.source || item?.model_key || item?.modelKey || ''
+  return source === 'local_model' ? 'local_model' : 'cloud_ai'
+}
+
+function resolveSourceLabel(item) {
+  return resolveSource(item) === 'local_model' ? '本地模型' : '云端AI'
+}
+
+function resolveDetectionCount(item) {
+  const detectionType = item?.detection_type || item?.type
+  if (detectionType === 'image') {
+    const labels = parseJsonField(item?.label, [])
+    return Array.isArray(labels) ? labels.length : 0
+  }
+  const stats = parseJsonField(item?.track_stats, {})
+  const totalCounts = stats?.total_counts || stats?.totalCounts || {}
+  if (!totalCounts || typeof totalCounts !== 'object') return 0
+  return Object.values(totalCounts).reduce((sum, count) => sum + (Number(count) || 0), 0)
+}
+
+function resolveDiseaseName(item) {
+  if (item?.disease_name) return item.disease_name
+  const detectionType = item?.detection_type || item?.type
+  if (detectionType === 'image') {
+    const labels = parseJsonField(item?.label, [])
+    if (Array.isArray(labels) && labels.length > 0) {
+      const first = String(labels[0])
+      return labels.length > 1 ? `${first} 等${labels.length}项` : first
+    }
+    return '未检测到病虫害'
+  }
+
+  const stats = parseJsonField(item?.track_stats, {})
+  const totalCounts = stats?.total_counts || stats?.totalCounts || {}
+  const entries = Object.entries(totalCounts || {}).filter(([, count]) => Number(count) > 0)
+  if (!entries.length) return '未检测到病虫害'
+
+  entries.sort((a, b) => Number(b[1]) - Number(a[1]))
+  const [topName, topCount] = entries[0]
+  const total = entries.reduce((sum, [, count]) => sum + (Number(count) || 0), 0)
+  return `${topName}（${topCount}次，合计${total}次）`
+}
+
+function resolveConfidence(item) {
+  const detectionType = item?.detection_type || item?.type
+  if (detectionType !== 'image') return null
+
+  if (typeof item?.confidence === 'number') {
+    return `${(item.confidence * 100).toFixed(1)}%`
+  }
+
+  const confidenceList = parseJsonField(item?.confidence, [])
+  if (!Array.isArray(confidenceList) || !confidenceList.length) return null
+  const numericList = confidenceList
+    .map((value) => Number(value))
+    .filter((value) => Number.isFinite(value))
+
+  if (!numericList.length) return null
+  const max = Math.max(...numericList)
+  const normalized = max <= 1 ? max * 100 : max
+  return `${normalized.toFixed(1)}%`
+}
+
 function formatTime(time) {
   if (!time) return ''
   return new Date(time).toLocaleString('zh-CN')
@@ -81,7 +156,12 @@ async function fetchData() {
   } catch (e) { console.error(e) }
 }
 
-function viewDetail(id) { router.push(`/history/${id}`) }
+function viewDetail(id, detectionType) {
+  router.push({
+    path: `/history/${id}`,
+    query: { type: detectionType || 'image' }
+  })
+}
 
 watch(filter, () => { page.value = 1; fetchData() }, { deep: true })
 onMounted(fetchData)

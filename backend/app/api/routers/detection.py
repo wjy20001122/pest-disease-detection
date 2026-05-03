@@ -3,16 +3,18 @@ import json
 import asyncio
 import base64
 import logging
+import redis
 from datetime import datetime, timedelta
 from typing import Optional, List, Dict, Any
 from fastapi import APIRouter, Depends, UploadFile, File, Query, HTTPException, WebSocket, WebSocketDisconnect
 from sqlalchemy import and_, desc, func, literal, select, union_all
 from sqlalchemy.orm import Session
 
-from app.db.session import get_db
+from app.db.session import get_db, SessionLocal
 from app.db.models import User, ImgRecord, VideoRecord, CameraRecord, ModelPolicy
 from app.api.deps import get_current_user, get_current_user_from_header_or_query, decode_token
 from app.api.routers.notifications import create_notification
+from app.core.config import settings
 from app.services.oss_service import oss_service
 from app.services.detection_router import detection_router, DetectionSource
 from app.services.review_agent import review_agent
@@ -33,6 +35,43 @@ camera_ws_sessions: Dict[str, Dict[str, Any]] = {}
 MAX_CAMERA_WS_FRAME_BYTES = 5 * 1024 * 1024
 
 DEFAULT_FALLBACK_NOTICE = "本地模型未识别到有效结果，已回退云端分析，结论未必完全可信。"
+
+
+def _ensure_admin_user(current_user: User) -> None:
+    if current_user.role != "admin":
+        raise HTTPException(status_code=403, detail="仅管理员可使用该功能")
+
+
+def _assert_video_queue_ready() -> None:
+    redis_client = None
+    try:
+        redis_client = redis.from_url(
+            settings.redis_url,
+            socket_connect_timeout=2,
+            socket_timeout=2,
+            decode_responses=True,
+        )
+        redis_client.ping()
+    except Exception as exc:
+        logger.warning("Video queue redis ping failed: %s", exc)
+        raise HTTPException(status_code=503, detail="视频任务队列不可用，请检查Redis服务")
+    finally:
+        if redis_client is not None:
+            try:
+                redis_client.close()
+            except Exception:
+                pass
+
+    try:
+        from app.tasks.celery_app import celery_app
+
+        inspector = celery_app.control.inspect(timeout=1.5)
+        ping_result = inspector.ping() if inspector else None
+        if not ping_result:
+            raise RuntimeError("no active celery workers")
+    except Exception as exc:
+        logger.warning("Video queue celery ping failed: %s", exc)
+        raise HTTPException(status_code=503, detail="视频任务队列不可用，请检查Celery worker服务")
 
 
 def _resolve_model_policy(
@@ -279,6 +318,9 @@ async def detect_video(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
+    _ensure_admin_user(current_user)
+    _assert_video_queue_ready()
+
     if not file.filename:
         raise HTTPException(status_code=400, detail="未上传文件")
 
@@ -343,9 +385,24 @@ async def get_video_status(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
+    _ensure_admin_user(current_user)
     task = get_owned_video_task(db, session_id, current_user.username)
     if not task:
         raise HTTPException(status_code=404, detail="会话不存在或已过期")
+
+    if task.status == "queued":
+        queued_timeout_sec = get_system_config_int(db, "video_task_queued_timeout_sec")
+        if queued_timeout_sec <= 0:
+            queued_timeout_sec = 60
+        elapsed = (datetime.now() - task.created_at).total_seconds() if task.created_at else 0
+        if elapsed >= queued_timeout_sec:
+            mark_video_task_failed(
+                db,
+                session_id=session_id,
+                error_message=f"视频任务排队超时（>{queued_timeout_sec}s），请检查Celery worker状态",
+            )
+            task = get_owned_video_task(db, session_id, current_user.username)
+
     return to_status_payload(task)
 
 
@@ -355,6 +412,7 @@ async def get_video_stream(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
+    _ensure_admin_user(current_user)
     from fastapi.responses import RedirectResponse
 
     task = get_owned_video_task(db, session_id, current_user.username)
@@ -377,6 +435,7 @@ async def stop_video_detection(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
+    _ensure_admin_user(current_user)
     task = get_owned_video_task(db, session_id, current_user.username)
     if not task:
         raise HTTPException(status_code=404, detail="会话不存在或已过期")
@@ -391,6 +450,7 @@ async def start_camera_detection(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
+    _ensure_admin_user(current_user)
     policy = _resolve_model_policy(db, model_key)
     effective_model_key = policy["effective_model_key"]
 
@@ -412,6 +472,7 @@ async def start_camera_detection(
 async def get_camera_stream(
     current_user: User = Depends(get_current_user_from_header_or_query)
 ):
+    _ensure_admin_user(current_user)
     from fastapi.responses import StreamingResponse
     from app.services.prediction_service import prediction_service
     return prediction_service.get_camera_stream()
@@ -421,6 +482,7 @@ async def get_camera_stream(
 async def stop_camera_detection(
     current_user: User = Depends(get_current_user)
 ):
+    _ensure_admin_user(current_user)
     from app.services.prediction_service import prediction_service
     result = prediction_service.stop_camera()
     return result
@@ -443,6 +505,16 @@ async def camera_ws_detection(
         return
 
     user_id = str(payload.get("sub"))
+    db = SessionLocal()
+    try:
+        user = db.execute(select(User).where(User.id == int(user_id))).scalar_one_or_none()
+    finally:
+        db.close()
+
+    if not user or user.role != "admin":
+        await websocket.close(code=1008, reason="Admin required")
+        return
+
     session_id = str(uuid.uuid4())
 
     await websocket.accept()

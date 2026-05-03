@@ -1,30 +1,31 @@
 # AGENTS
 
-## Fast Start (Verified)
-- Repo is split: `frontend/` (Vue 3 + Vite) and `backend/` (FastAPI).
-- Frontend API base is fixed to `/api` in `frontend/src/api/index.js`; dev proxy forwards to backend in `frontend/vite.config.js`.
-- Vite dev server must keep `server.allowedHosts: ['.monkeycode-ai.online']` in `frontend/vite.config.js`.
+## 快速开始（已验证）
+- 仓库分为两部分：`frontend/`（Vue 3 + Vite）与 `backend/`（FastAPI）。
+- 前端 API 基地址在 `frontend/src/api/index.js` 固定为 `/api`；开发环境通过 `frontend/vite.config.js` 的代理转发到后端。
+- `frontend/vite.config.js` 中必须保留 `server.allowedHosts: ['.monkeycode-ai.online']`。
 
-## Commands You Actually Need
-- Frontend install: `cd frontend && npm install`
-- Frontend dev: `cd frontend && npm run dev -- --host 0.0.0.0 --port 3000`
-- Frontend build: `cd frontend && npm run build`
-- Backend install: `cd backend && pip install -r requirements.txt`
-- Backend dev (works with frontend proxy): `cd backend && python3 -m uvicorn app.main:app --host 0.0.0.0 --port 8000`
+## 常用命令（直接可用）
+- 前端安装依赖：`cd frontend && npm install`
+- 前端开发启动：`cd frontend && npm run dev -- --host 0.0.0.0 --port 3000`
+- 前端构建：`cd frontend && npm run build`
+- 后端安装依赖：`cd backend && pip install -r requirements.txt`
+- 后端开发启动（可配合前端代理）：`cd backend && python3 -m uvicorn app.main:app --host 0.0.0.0 --port 8000`
 
-## Non-Obvious Runtime Gotchas
-- `python backend/main.py` uses `settings.port` from `backend/app/core/config.py` (default `9999`), which does not match frontend proxy target (`8000`). If you run `main.py`, set `FASTAPI_PORT=8000`.
-- Backend startup auto-creates DB tables (`Base.metadata.create_all`) on app startup in `backend/app/main.py`.
-- There are two DB/model stacks:
-  - Active API stack: `backend/app/db/*` (sync SQLAlchemy engine, used by routers).
-  - Script stack: `backend/app/models/*` (async engine, used by `scripts/init_db.py` and `scripts/test_db.py`).
-  Do not mix imports between these stacks in new code.
+## 运行注意事项（容易忽略）
+- `python backend/main.py` 使用的是 `backend/app/core/config.py` 里的 `settings.port`（默认 `9999`），与前端代理目标端口 `8000` 不一致。若运行 `main.py`，请设置 `FASTAPI_PORT=8000`。
+- 后端启动时会在 `backend/app/main.py` 自动执行建表（`Base.metadata.create_all`）。
+- 仓库里有两套数据库/模型栈：
+  - 主 API 栈：`backend/app/db/*`（同步 SQLAlchemy，引入于路由主链路）
+  - 脚本栈：`backend/app/models/*`（异步引擎，供 `scripts/init_db.py` 与 `scripts/test_db.py` 使用）
+  新增代码时不要混用这两套导入。
 
-## Testing / CI Reality
-- No local lint/typecheck config is present in repo (no ESLint/Prettier/pytest config files).
-- CI workflow is `.github/workflows/deploy.yml` and currently runs backend tests as non-blocking: `pytest --tb=short || true`.
-- CI deploy trigger is branch `main` (not `master`).
+## 测试 / CI 现状
+- 仓库当前没有本地 lint/typecheck 配置（无 ESLint/Prettier）。
+- `backend/pytest.ini` 已存在并作为后端测试默认配置。
+- CI 工作流在 `.github/workflows/deploy.yml`，后端测试为阻断模式：`python3 -m pytest --tb=short`。
+- CI 部署触发分支是 `master`。
 
-## Deployment Clues
-- Production-like nginx + PM2 templates live in `deploy/bt/`.
-- PM2 config runs backend from `backend/main.py` (`deploy/bt/ecosystem.config.json`), so port/env consistency matters.
+## 部署提示
+- 类生产环境的 nginx + PM2 模板位于 `deploy/bt/`。
+- PM2 配置通过 `backend/main.py` 启动后端（`deploy/bt/ecosystem.config.json`），因此端口与环境变量一致性很关键。

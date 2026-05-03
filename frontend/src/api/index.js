@@ -51,6 +51,7 @@ export default request
 // 认证相关 API
 export const authApi = {
   register: (data) => request.post('/auth/register', null, { params: data }),
+  sendEmailCode: (params) => request.post('/auth/email/send-code', null, { params }),
   login: (data) => {
     const form = new URLSearchParams()
     form.append('username', data.username)
@@ -59,6 +60,8 @@ export const authApi = {
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' }
     })
   },
+  sendResetCode: (params) => request.post('/auth/password/send-code', null, { params }),
+  resetPassword: (params) => request.post('/auth/password/reset', null, { params }),
   logout: () => request.post('/auth/logout'),
   getProfile: () => request.get('/auth/profile'),
   updateProfile: (data) => request.put('/auth/profile', null, { params: data })
@@ -118,6 +121,7 @@ export const trackingApi = {
 // 环境数据 API
 export const environmentApi = {
   current: (params) => request.get('/environment/current', { params }),
+  ipCurrent: () => request.get('/environment/ip-current'),
   weather: (params) => request.get('/environment/weather', { params }),
   manual: (params) => request.post('/environment/manual', null, { params })
 }

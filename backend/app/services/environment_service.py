@@ -11,6 +11,11 @@ class EnvironmentData:
     latitude: Optional[float] = None
     longitude: Optional[float] = None
     address: str = ""
+    province: str = ""
+    city: str = ""
+    district: str = ""
+    county: str = ""
+    township: str = ""
     weather: str = ""
     temperature: Optional[float] = None
     humidity: Optional[float] = None
@@ -26,6 +31,7 @@ class WeatherService:
     def __init__(self):
         self.api_key = settings.weather_api_key
         self.base_url = settings.weather_api_base_url
+        self.is_amap = "restapi.amap.com" in (self.base_url or "")
 
     async def get_current_weather(self, location: str) -> Dict[str, Any]:
         """获取实时天气"""
@@ -34,17 +40,45 @@ class WeatherService:
 
         try:
             async with httpx.AsyncClient(timeout=10.0) as client:
-                response = await client.get(
-                    f"{self.base_url}/v7/weather/now",
-                    params={
-                        "key": self.api_key,
-                        "location": location
-                    }
-                )
+                if self.is_amap:
+                    weather_url = self.base_url.rstrip('/')
+                    if "weatherInfo" not in weather_url:
+                        weather_url = f"{weather_url}/v3/weather/weatherInfo"
+                    response = await client.get(
+                        weather_url,
+                        params={
+                            "key": self.api_key,
+                            "city": location,
+                            "extensions": "base",
+                        }
+                    )
+                else:
+                    response = await client.get(
+                        f"{self.base_url.rstrip('/')}/v7/weather/now",
+                        params={
+                            "key": self.api_key,
+                            "location": location
+                        }
+                    )
                 response.raise_for_status()
                 data = response.json()
 
-                if data.get("code") == "200":
+                if self.is_amap and data.get("status") == "1":
+                    live_list = data.get("lives", []) or []
+                    live = live_list[0] if live_list else {}
+                    return {
+                        "temperature": float(live.get("temperature_float") or live.get("temperature") or 0),
+                        "feels_like": float(live.get("temperature_float") or live.get("temperature") or 0),
+                        "humidity": float(live.get("humidity_float") or live.get("humidity") or 0),
+                        "wind_speed": live.get("windpower"),
+                        "wind_dir": live.get("winddirection", ""),
+                        "pressure": None,
+                        "visibility": None,
+                        "weather": live.get("weather", ""),
+                        "weather_code": "",
+                        "recorded_at": live.get("reporttime", "")
+                    }
+                if (not self.is_amap) and data.get("code") == "200":
                     now = data.get("now", {})
                     return {
                         "temperature": float(now.get("temp", 0)),
@@ -58,8 +92,8 @@ class WeatherService:
                         "weather_code": now.get("icon", ""),
                         "recorded_at": data.get("updateTime", "")
                     }
-                else:
-                    return {"error": f"API错误: {data.get('code')}"}
+                err_code = data.get("code") or data.get("infocode") or data.get("status")
+                return {"error": f"API错误: {err_code}"}
         except httpx.TimeoutException:
             return {"error": "天气请求超时"}
         except Exception as e:
@@ -75,8 +109,22 @@ class MapService:
 
     async def reverse_geocode(self, latitude: float, longitude: float) -> str:
         """将经纬度转换为地址"""
+        details = await self.reverse_geocode_details(latitude, longitude)
+        return details.get("address", f"{latitude},{longitude}")
+
+    async def reverse_geocode_details(self, latitude: float, longitude: float) -> Dict[str, str]:
+        """将经纬度转换为结构化地址"""
         if not self.api_key:
-            return f"{latitude},{longitude}"
+            fallback = f"{latitude},{longitude}"
+            return {
+                "address": fallback,
+                "province": "",
+                "city": "",
+                "district": "",
+                "county": "",
+                "township": "",
+                "adcode": "",
+            }
 
         try:
             async with httpx.AsyncClient(timeout=10.0) as client:
@@ -85,7 +133,7 @@ class MapService:
                     params={
                         "key": self.api_key,
                         "location": f"{longitude},{latitude}",
-                        "extensions": "base"
+                        "extensions": "all"
                     }
                 )
                 response.raise_for_status()
@@ -93,18 +141,92 @@ class MapService:
 
                 if data.get("status") == "1":
                     regeocode = data.get("regeocode", {})
-                    address = regeocode.get("formatted_address", "")
-                    return address
-                else:
-                    return f"{latitude},{longitude}"
+                    component = regeocode.get("addressComponent", {}) or {}
+                    district = component.get("district", "") or ""
+                    county = district
+                    city = component.get("city", "")
+                    if isinstance(city, list):
+                        city = city[0] if city else ""
+                    if not city:
+                        city = component.get("province", "") or ""
+                    return {
+                        "address": regeocode.get("formatted_address", "") or f"{latitude},{longitude}",
+                        "province": component.get("province", "") or "",
+                        "city": city or "",
+                        "district": district,
+                        "county": county,
+                        "township": component.get("township", "") or "",
+                        "adcode": component.get("adcode", "") or "",
+                    }
+                fallback = f"{latitude},{longitude}"
+                return {
+                    "address": fallback,
+                    "province": "",
+                    "city": "",
+                    "district": "",
+                    "county": "",
+                    "township": "",
+                    "adcode": "",
+                }
         except Exception:
-            return f"{latitude},{longitude}"
+            fallback = f"{latitude},{longitude}"
+            return {
+                "address": fallback,
+                "province": "",
+                "city": "",
+                "district": "",
+                "county": "",
+                "township": "",
+                "adcode": "",
+            }
 
     async def get_weather_by_coordinates(self, latitude: float, longitude: float) -> Dict[str, Any]:
         """通过坐标获取天气"""
         weather_service = WeatherService()
         location = f"{longitude},{latitude}"
         return await weather_service.get_current_weather(location)
+
+    async def ip_location(self, client_ip: str = "") -> Dict[str, Any]:
+        """通过IP定位（高德IP定位）"""
+        if not self.api_key:
+            return {"address": "", "province": "", "city": "", "district": "", "county": "", "township": ""}
+
+        try:
+            params = {"key": self.api_key}
+            ip_value = (client_ip or "").strip()
+            if ip_value and ip_value not in {"127.0.0.1", "::1", "localhost"}:
+                params["ip"] = ip_value
+
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                response = await client.get(f"{self.base_url}/v3/ip", params=params)
+                response.raise_for_status()
+                data = response.json()
+
+            if data.get("status") != "1":
+                return {"address": "", "province": "", "city": "", "district": "", "county": "", "township": ""}
+
+            province = data.get("province", "") or ""
+            city = data.get("city", "") or ""
+            district = data.get("district", "") or ""
+            if isinstance(province, list):
+                province = province[0] if province else ""
+            if isinstance(city, list):
+                city = city[0] if city else ""
+            if isinstance(district, list):
+                district = district[0] if district else ""
+            county = district
+            address = "".join([province, city, district]).strip()
+            return {
+                "address": address,
+                "province": province,
+                "city": city,
+                "district": district,
+                "county": county,
+                "township": "",
+                "adcode": (data.get("adcode")[0] if isinstance(data.get("adcode"), list) and data.get("adcode") else data.get("adcode", "")) or "",
+            }
+        except Exception:
+            return {"address": "", "province": "", "city": "", "district": "", "county": "", "township": "", "adcode": ""}
 
 
 class EnvironmentService:
@@ -144,6 +266,13 @@ class EnvironmentService:
 
         resolved_address = address
         weather_data = {}
+        address_details = {
+            "province": "",
+            "city": "",
+            "district": "",
+            "county": "",
+            "township": "",
+        }
 
         for i, result in enumerate(results):
             if isinstance(result, Exception):
@@ -151,8 +280,9 @@ class EnvironmentService:
             if not result:
                 continue
 
-            if i == 0 and isinstance(result, str) and result:
-                resolved_address = result
+            if i == 0 and isinstance(result, dict):
+                resolved_address = result.get("address", "") or resolved_address
+                address_details = result
             elif i == 1 and isinstance(result, dict):
                 weather_data = result
             elif i == 2 and isinstance(result, dict):
@@ -162,6 +292,11 @@ class EnvironmentService:
             latitude=latitude,
             longitude=longitude,
             address=resolved_address,
+            province=address_details.get("province", ""),
+            city=address_details.get("city", ""),
+            district=address_details.get("district", ""),
+            county=address_details.get("county", ""),
+            township=address_details.get("township", ""),
             weather=weather_data.get("weather", ""),
             temperature=weather_data.get("temperature"),
             humidity=weather_data.get("humidity"),
@@ -171,14 +306,25 @@ class EnvironmentService:
             recorded_at=weather_data.get("recorded_at") or datetime.now().isoformat()
         )
 
-    async def _get_address_from_coords(self, latitude: float, longitude: float) -> str:
+    async def _get_address_from_coords(self, latitude: float, longitude: float) -> Dict[str, str]:
         """通过坐标获取地址"""
         map_service = MapService()
-        return await map_service.reverse_geocode(latitude, longitude)
+        return await map_service.reverse_geocode_details(latitude, longitude)
 
     async def _get_weather_from_coords(self, latitude: float, longitude: float) -> Dict[str, Any]:
         """通过坐标获取天气"""
         weather_service = WeatherService()
+        if weather_service.is_amap:
+            map_service = MapService()
+            detail = await map_service.reverse_geocode_details(latitude, longitude)
+            city_code = detail.get("adcode") or detail.get("city") or detail.get("province")
+            if not city_code:
+                return {}
+            weather = await weather_service.get_current_weather(city_code)
+            if weather.get("error"):
+                return {}
+            return weather
+
         location = f"{longitude},{latitude}"
         return await weather_service.get_current_weather(location)
 
@@ -186,6 +332,38 @@ class EnvironmentService:
         """获取指定位置的天气"""
         weather_service = WeatherService()
         return await weather_service.get_current_weather(location)
+
+    async def get_environment_by_ip(self, client_ip: str = "") -> EnvironmentData:
+        """通过IP定位获取基础环境（不依赖前端定位权限）"""
+        map_service = MapService()
+        ip_data = await map_service.ip_location(client_ip)
+        address = ip_data.get("address", "") or ""
+        city = ip_data.get("adcode") or ip_data.get("city", "") or ""
+        if not address:
+            address = "".join([ip_data.get("province", "") or "", ip_data.get("city", "") or "", ip_data.get("district", "") or ""]).strip()
+        if not address:
+            address = "本地网络未提供IP归属地，请开启浏览器定位"
+        weather_data = {}
+        if city:
+            weather_data = await WeatherService().get_current_weather(city)
+            if weather_data.get("error"):
+                weather_data = {}
+
+        return EnvironmentData(
+            address=address,
+            province=ip_data.get("province", "") or "",
+            city=city,
+            district=ip_data.get("district", "") or "",
+            county=ip_data.get("county", "") or "",
+            township=ip_data.get("township", "") or "",
+            weather=weather_data.get("weather", ""),
+            temperature=weather_data.get("temperature"),
+            humidity=weather_data.get("humidity"),
+            wind_speed=weather_data.get("wind_speed"),
+            pressure=weather_data.get("pressure"),
+            visibility=weather_data.get("visibility"),
+            recorded_at=weather_data.get("recorded_at") or datetime.now().isoformat()
+        )
 
 
 environment_service = EnvironmentService()

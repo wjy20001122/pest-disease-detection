@@ -791,7 +791,7 @@ class PredictionService:
             session.is_processing = True
 
             frame_count = 0
-            keyframe_interval = max(1, original_fps // 2)
+            keyframe_interval = max(1, original_fps // 5)
             all_detections = []
             keyframe_count = 0
 
@@ -906,10 +906,18 @@ class PredictionService:
                     "detections": detections_tail,
                 }
 
-            for progress_val in self.convert_avi_to_mp4(session.video_output_path, session.output_path):
-                socket_manager.emit_nowait("progress", {"sessionId": task_session_id, "data": progress_val})
+            final_video_path = session.video_output_path
+            try:
+                for progress_val in self.convert_avi_to_mp4(session.video_output_path, session.output_path):
+                    socket_manager.emit_nowait("progress", {"sessionId": task_session_id, "data": progress_val})
+                if session.output_path.exists() and session.output_path.stat().st_size > 0:
+                    final_video_path = session.output_path
+            except (FileNotFoundError, NotADirectoryError) as exc:
+                logger.warning("ffmpeg not available, fallback to AVI output: %s", exc)
+            except Exception as exc:
+                logger.warning("Video conversion failed, fallback to AVI output: %s", exc)
 
-            uploaded_url = oss_service.upload_file(session.output_path, "video_predict")
+            uploaded_url = oss_service.upload_file(final_video_path, "video_predict")
             session.data["outVideo"] = uploaded_url
             session.data["trackStats"] = json.dumps(final_stats, ensure_ascii=False)
 

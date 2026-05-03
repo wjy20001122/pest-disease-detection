@@ -1,6 +1,9 @@
 <template>
   <div class="settings-page">
-    <PageHeader title="个人设置" subtitle="管理资料、安全、通知与检测偏好" />
+    <PageHeader
+      title="个人设置"
+      :subtitle="userStore.isAdmin ? '管理资料、安全、通知与检测偏好' : '管理资料、安全与通知设置'"
+    />
 
     <div class="settings-layout">
       <!-- 设置导航 -->
@@ -142,7 +145,7 @@
         </div>
 
         <!-- 检测偏好 -->
-        <div v-if="activeTab === 'preferences'" class="settings-section">
+        <div v-if="activeTab === 'preferences' && userStore.isAdmin" class="settings-section">
           <h2>检测偏好</h2>
           
           <el-form label-width="140px">
@@ -177,7 +180,7 @@
         </div>
 
         <!-- API密钥 -->
-        <div v-if="activeTab === 'api'" class="settings-section">
+        <div v-if="activeTab === 'api' && userStore.isAdmin" class="settings-section">
           <h2>API密钥</h2>
           <p class="section-desc">使用API密钥可以访问公开API接口，实现第三方系统集成。</p>
 
@@ -264,7 +267,7 @@
 </template>
 
 <script setup>
-import { ref, reactive, onMounted } from 'vue'
+import { ref, reactive, onMounted, computed, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { useUserStore } from '@/stores/user'
 import { authApi } from '@/api'
@@ -277,14 +280,20 @@ const showLoginHistory = ref(false)
 const pushPermission = ref('default')
 const requestingPush = ref(false)
 
-const tabs = [
+const baseTabs = [
   { key: 'profile', name: '个人信息', icon: '👤' },
   { key: 'security', name: '账户安全', icon: '🔒' },
   { key: 'notifications', name: '通知设置', icon: '🔔' },
-  { key: 'preferences', name: '检测偏好', icon: '⚙️' },
-  { key: 'api', name: 'API密钥', icon: '🔑' },
   { key: 'data', name: '数据管理', icon: '📦' }
 ]
+const adminOnlyTabs = [
+  { key: 'preferences', name: '检测偏好', icon: '⚙️' },
+  { key: 'api', name: 'API密钥', icon: '🔑' }
+]
+
+const tabs = computed(() => (userStore.isAdmin
+  ? [...baseTabs.slice(0, 3), ...adminOnlyTabs, baseTabs[3]]
+  : baseTabs))
 
 const profileForm = reactive({
   username: '',
@@ -460,6 +469,12 @@ onMounted(() => {
   fetchUserProfile()
   checkPushPermission()
 })
+
+watch(tabs, (nextTabs) => {
+  if (!nextTabs.some(tab => tab.key === activeTab.value)) {
+    activeTab.value = nextTabs[0]?.key || 'profile'
+  }
+}, { immediate: true })
 </script>
 
 <style lang="scss" scoped>

@@ -1,5 +1,7 @@
 # 宝塔面板部署指南（当前仓库）
 
+更新时间：2026-05-03
+
 ## 1) 目标环境
 
 - 宝塔面板 7+
@@ -15,12 +17,12 @@
 - 前端生产构建目录：`/www/pest-disease-detection/frontend/dist`
 - 前端请求约定：`/api/*`，Nginx 需重写到后端 `/*`
 
-## 3) 数据库与账号（按当前联调）
+## 3) 数据库与账号（请使用你的生产配置）
 
-- 数据库：`corn`
-- 用户：`appuser`
-- 密码：`Gwrr76AhsSYwmhde`
-- 主机：`139.129.37.65:3306`
+- 数据库：`<your_db_name>`
+- 用户：`<your_db_user>`
+- 密码：`<your_db_password>`
+- 主机：`<your_db_host>:<your_db_port>`
 
 如需改库名/账号，可在执行部署脚本时通过环境变量覆盖：
 
