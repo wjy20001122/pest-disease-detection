@@ -1,7 +1,5 @@
 <template>
   <div class="knowledge-page">
-    <PageHeader title="知识库" subtitle="中国权威来源病虫害知识工作台（小麦/玉米/水稻）" />
-
     <section class="top-search card-lite">
       <div class="search-main">
         <el-input
@@ -283,15 +281,6 @@
           </div>
           <div class="source-actions">
             <el-button size="small" :icon="CopyDocument" @click="copySource(current)">复制来源</el-button>
-            <el-button
-              v-if="current.source_url"
-              size="small"
-              type="primary"
-              :icon="Link"
-              @click="openSource(current.source_url)"
-            >
-              打开链接
-            </el-button>
           </div>
         </section>
       </div>
@@ -303,10 +292,9 @@
 <script setup>
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { ElMessage } from 'element-plus'
-import { ArrowRightBold, CopyDocument, Filter, Link, Reading, RefreshRight, Search } from '@element-plus/icons-vue'
+import { ArrowRightBold, CopyDocument, Filter, Reading, RefreshRight, Search } from '@element-plus/icons-vue'
 import { knowledgeApi } from '@/api'
 import EmptyState from '@/components/ui/EmptyState.vue'
-import PageHeader from '@/components/ui/PageHeader.vue'
 
 const cropOptions = ['玉米', '小麦', '水稻']
 const categoryOptions = ['虫害', '病害']
@@ -513,10 +501,6 @@ async function copySource(item) {
   } catch {
     ElMessage.warning('复制失败，请手动复制')
   }
-}
-
-function openSource(url) {
-  window.open(url, '_blank')
 }
 
 function onResize() {
@@ -915,6 +899,7 @@ onBeforeUnmount(() => {
   line-height: 1.7;
   color: var(--text-secondary);
   font-size: 13px;
+  white-space: pre-wrap;
 }
 
 .tags {

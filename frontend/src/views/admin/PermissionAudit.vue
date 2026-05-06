@@ -1,7 +1,5 @@
 <template>
   <div class="admin-page">
-    <PageHeader title="权限审计" subtitle="查看 401/403 拒绝访问事件与来源信息" />
-
     <div class="toolbar">
       <el-select v-model="filters.status_code" clearable placeholder="状态码" style="width: 120px">
         <el-option :value="401" label="401" />
@@ -39,7 +37,6 @@
 <script setup>
 import { onMounted, reactive, ref } from 'vue'
 import { adminApi } from '@/api'
-import PageHeader from '@/components/ui/PageHeader.vue'
 
 const filters = reactive({
   status_code: undefined,

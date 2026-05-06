@@ -7,7 +7,7 @@ import redis
 from datetime import datetime, timedelta
 from typing import Optional, List, Dict, Any
 from fastapi import APIRouter, Depends, UploadFile, File, Query, HTTPException, WebSocket, WebSocketDisconnect
-from sqlalchemy import and_, desc, func, literal, select, union_all
+from sqlalchemy import and_, delete, desc, func, literal, select, union_all
 from sqlalchemy.orm import Session
 
 from app.db.session import get_db, SessionLocal
@@ -802,6 +802,31 @@ async def get_history(
         "total": total,
         "page": page,
         "page_size": page_size
+    }
+
+
+@router.delete("/history")
+async def clear_history(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    img_deleted = db.execute(
+        delete(ImgRecord).where(ImgRecord.username == current_user.username)
+    ).rowcount or 0
+    video_deleted = db.execute(
+        delete(VideoRecord).where(VideoRecord.username == current_user.username)
+    ).rowcount or 0
+    camera_deleted = db.execute(
+        delete(CameraRecord).where(CameraRecord.username == current_user.username)
+    ).rowcount or 0
+    db.commit()
+    return {
+        "deleted": {
+            "image": img_deleted,
+            "video": video_deleted,
+            "camera": camera_deleted,
+            "total": img_deleted + video_deleted + camera_deleted,
+        }
     }
 
 

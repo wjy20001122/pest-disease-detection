@@ -1,7 +1,5 @@
 <template>
   <div class="admin-page">
-    <PageHeader title="通知治理" subtitle="按类型筛选通知并执行广播与批量已读" />
-
     <div class="toolbar">
       <el-select v-model="filters.type" clearable placeholder="通知类型" style="width: 140px">
         <el-option label="system" value="system" />
@@ -75,7 +73,6 @@
 import { onMounted, reactive, ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import { adminApi } from '@/api'
-import PageHeader from '@/components/ui/PageHeader.vue'
 
 const filters = reactive({
   type: '',

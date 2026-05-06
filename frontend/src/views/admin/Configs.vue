@@ -1,7 +1,5 @@
 <template>
   <div class="admin-page">
-    <PageHeader title="系统配置" subtitle="统一管理阈值、重试和队列相关参数" />
-
     <el-form label-width="260px" class="config-form">
       <el-form-item v-for="item in configFields" :key="item.key" :label="item.label">
         <el-input-number
@@ -32,7 +30,6 @@
 import { onMounted, reactive } from 'vue'
 import { ElMessage } from 'element-plus'
 import { adminApi } from '@/api'
-import PageHeader from '@/components/ui/PageHeader.vue'
 
 const configFields = [
   { key: 'review_trigger_confidence', label: '审查触发置信度阈值', type: 'float', min: 0, max: 1, step: 0.05 },

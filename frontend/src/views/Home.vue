@@ -1,10 +1,5 @@
 <template>
   <div class="home-page">
-    <PageHeader
-      :title="userStore.isAdmin ? '管理运营总览' : '检测工作台'"
-      :subtitle="userStore.isAdmin ? '查看全局运营状态与队列健康' : '本地检测优先，普通用户仅图像检测'"
-    />
-
     <div class="weather-panel">
       <div class="weather-head">
         <div class="weather-item">
@@ -22,14 +17,25 @@
       </div>
       <div class="forecast-block">
         <div class="forecast-title">
-          <span>未来7天天气</span>
+          <span>{{ environment.county || environment.address || '当前位置' }}</span>
           <small v-if="forecastError">{{ forecastError }}</small>
         </div>
-        <div class="forecast-grid" v-if="weeklyForecast.length">
-          <div class="forecast-card" v-for="(item, idx) in weeklyForecast" :key="`${item.date}-${idx}`">
-            <span class="day">{{ item.dayLabel }}</span>
-            <span class="weather">{{ item.weatherText }}</span>
-            <span class="temp">{{ formatTempRange(item.tempMin, item.tempMax) }}</span>
+
+        <div class="forecast-main" v-if="weeklyForecast.length">
+          <div class="now-panel">
+            <div class="now-temp">{{ environment.temperature ?? '--' }}<em>°C</em></div>
+            <div class="now-text">
+              <strong>{{ environment.weather || weeklyForecast[0]?.weatherText || '天气' }}</strong>
+              <span>{{ formatTempPair(weeklyForecast[0]?.tempMax, weeklyForecast[0]?.tempMin) }}</span>
+            </div>
+          </div>
+
+          <div class="forecast-grid">
+            <div class="forecast-card" v-for="(item, idx) in weeklyForecast" :key="`${item.date}-${idx}`">
+              <span class="day">{{ item.dayLabel }}</span>
+              <span class="weather">{{ item.weatherText }}</span>
+              <span class="temp">{{ formatTempPair(item.tempMax, item.tempMin) }}</span>
+            </div>
           </div>
         </div>
         <div class="forecast-empty" v-else>
@@ -102,7 +108,6 @@
 import { computed, onMounted, ref } from 'vue'
 import { useUserStore } from '@/stores/user'
 import { adminApi, detectionApi, environmentApi, trackingApi } from '@/api'
-import PageHeader from '@/components/ui/PageHeader.vue'
 import MetricCard from '@/components/ui/MetricCard.vue'
 import DataPanel from '@/components/ui/DataPanel.vue'
 import EmptyState from '@/components/ui/EmptyState.vue'
@@ -202,6 +207,12 @@ function formatTempRange(min, max) {
   const minText = Number.isFinite(min) ? `${Math.round(min)}°` : '--'
   const maxText = Number.isFinite(max) ? `${Math.round(max)}°` : '--'
   return `${minText} ~ ${maxText}`
+}
+
+function formatTempPair(max, min) {
+  const maxText = Number.isFinite(max) ? `${Math.round(max)}°` : '--'
+  const minText = Number.isFinite(min) ? `${Math.round(min)}°` : '--'
+  return `高温 ${maxText} 低温 ${minText}`
 }
 
 function resolveWeatherText(code) {
@@ -375,55 +386,108 @@ onMounted(async () => {
 }
 
 .forecast-block {
-  border: 1px dashed var(--border-light);
+  border: 1px solid #d8e5f7;
   border-radius: var(--radius-md);
-  padding: 10px;
+  background: #e6f0fd;
+  padding: 12px;
 }
 
 .forecast-title {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-bottom: 8px;
-  font-size: 13px;
-  color: var(--text-secondary);
+  margin-bottom: 10px;
+  font-size: 14px;
+  color: #203a5f;
 }
 
 .forecast-title small {
   color: var(--warning);
 }
 
+.forecast-main {
+  display: grid;
+  gap: 10px;
+}
+
+.now-panel {
+  border: 1px solid #cdddf5;
+  border-radius: 8px;
+  background: #d9e9ff;
+  padding: 14px 16px;
+  display: flex;
+  align-items: center;
+  gap: 20px;
+}
+
+.now-temp {
+  font-size: 64px;
+  font-weight: 700;
+  color: #0c2746;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+}
+
+.now-temp em {
+  font-style: normal;
+  font-size: 28px;
+  margin-left: 4px;
+}
+
+.now-text {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.now-text strong {
+  font-size: 34px;
+  line-height: 1;
+  color: #1b3658;
+}
+
+.now-text span {
+  font-size: 28px;
+  color: #33587f;
+}
+
 .forecast-grid {
   display: grid;
-  grid-template-columns: repeat(7, minmax(0, 1fr));
-  gap: 8px;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 10px;
 }
 
 .forecast-card {
-  border: 1px solid var(--border-light);
+  border: 1px solid #cfe0f7;
   border-radius: var(--radius-sm);
-  padding: 8px;
+  min-height: 120px;
+  padding: 10px 8px;
   text-align: center;
-  background: var(--surface-2);
+  background: #dcecff;
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  justify-content: center;
+  gap: 6px;
 }
 
 .forecast-card .day {
-  font-size: 12px;
-  color: var(--text-secondary);
+  font-size: 28px;
+  color: #58739b;
+  line-height: 1.2;
 }
 
 .forecast-card .weather {
-  font-size: 13px;
+  font-size: 24px;
   font-weight: 600;
-  color: var(--text-primary);
+  color: #1f3f65;
+  line-height: 1.2;
 }
 
 .forecast-card .temp {
-  font-size: 12px;
-  color: var(--primary);
+  font-size: 20px;
+  color: #2563eb;
+  line-height: 1.2;
+  font-variant-numeric: tabular-nums;
 }
 
 .forecast-empty {
@@ -512,8 +576,23 @@ onMounted(async () => {
   .metric-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
+  .now-temp {
+    font-size: 48px;
+  }
+  .now-text strong {
+    font-size: 24px;
+  }
+  .now-text span {
+    font-size: 20px;
+  }
   .forecast-grid {
-    grid-template-columns: repeat(4, minmax(0, 1fr));
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+  .forecast-card .day {
+    font-size: 22px;
+  }
+  .forecast-card .weather {
+    font-size: 18px;
   }
 }
 
@@ -524,8 +603,38 @@ onMounted(async () => {
   .panel-grid {
     grid-template-columns: minmax(0, 1fr);
   }
+  .now-panel {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 10px;
+  }
+  .now-temp {
+    font-size: 36px;
+  }
+  .now-temp em {
+    font-size: 20px;
+  }
+  .now-text strong {
+    font-size: 18px;
+  }
+  .now-text span {
+    font-size: 14px;
+  }
   .forecast-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+  }
+  .forecast-card {
+    min-height: 92px;
+  }
+  .forecast-card .day {
+    font-size: 18px;
+  }
+  .forecast-card .weather {
+    font-size: 14px;
+  }
+  .forecast-card .temp {
+    font-size: 13px;
   }
 }
 </style>

@@ -1,10 +1,5 @@
 <template>
   <div class="settings-page">
-    <PageHeader
-      title="个人设置"
-      :subtitle="userStore.isAdmin ? '管理资料、安全、通知与检测偏好' : '管理资料、安全与通知设置'"
-    />
-
     <div class="settings-layout">
       <!-- 设置导航 -->
       <aside class="settings-nav">
@@ -270,8 +265,7 @@
 import { ref, reactive, onMounted, computed, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { useUserStore } from '@/stores/user'
-import { authApi } from '@/api'
-import PageHeader from '@/components/ui/PageHeader.vue'
+import { authApi, detectionApi } from '@/api'
 
 const userStore = useUserStore()
 const activeTab = ref('profile')
@@ -451,8 +445,10 @@ function exportData() {
 
 function confirmClearHistory() {
   ElMessageBox.confirm('确定要清空所有检测历史吗？此操作不可恢复。', '警告', { type: 'warning' })
-    .then(() => {
-      ElMessage.success('历史记录已清空')
+    .then(async () => {
+      const res = await detectionApi.clearHistory()
+      const total = res?.deleted?.total ?? 0
+      ElMessage.success(`历史记录已清空（${total}条）`)
     })
     .catch(() => {})
 }

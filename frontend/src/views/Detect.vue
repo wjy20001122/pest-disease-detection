@@ -1,7 +1,5 @@
 <template>
   <div class="detect-page">
-    <PageHeader title="病虫害检测" subtitle="普通用户仅图像检测，管理员可使用视频与摄像头检测" />
-
     <div class="detect-tabs" v-if="isAdmin">
       <button :class="{ active: tab === 'image' }" @click="switchTab('image')">图像检测</button>
       <button :class="{ active: tab === 'video' }" @click="switchTab('video')">视频检测</button>
@@ -323,7 +321,6 @@ import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { ElMessage } from 'element-plus'
 import { detectionApi, environmentApi, mlApi } from '@/api'
 import { useUserStore } from '@/stores/user'
-import PageHeader from '@/components/ui/PageHeader.vue'
 
 const userStore = useUserStore()
 const isAdmin = computed(() => userStore.user?.role === 'admin')

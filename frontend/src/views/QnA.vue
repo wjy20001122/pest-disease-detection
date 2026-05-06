@@ -1,7 +1,5 @@
 <template>
   <div class="qna-page">
-    <PageHeader title="智能问答" subtitle="基于知识库与检测上下文的辅助问答" />
-
     <div class="qna-toolbar">
       <el-button plain size="small" @click="toggleHistory">
         {{ historyCollapsed ? '显示对话历史' : '隐藏对话历史' }}
@@ -127,7 +125,6 @@
 import { ref, nextTick, onMounted, watch } from 'vue'
 import { ElMessage } from 'element-plus'
 import { qnaApi } from '@/api'
-import PageHeader from '@/components/ui/PageHeader.vue'
 
 const conversations = ref([])
 const currentConversationId = ref(null)
@@ -159,10 +156,84 @@ function formatTime(time) {
 
 function formatMessage(content) {
   if (!content) return ''
-  return content
-    .replace(/\n/g, '<br>')
-    .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
-    .replace(/\*(.*?)\*/g, '<em>$1</em>')
+  const text = escapeHtml(String(content))
+  const lines = text.split('\n')
+  const blocks = []
+  let i = 0
+
+  while (i < lines.length) {
+    const raw = lines[i].trim()
+    if (!raw) {
+      i += 1
+      continue
+    }
+
+    if (raw.startsWith('### ')) {
+      blocks.push(`<h4>${applyInlineMarkdown(raw.slice(4))}</h4>`)
+      i += 1
+      continue
+    }
+    if (raw.startsWith('## ')) {
+      blocks.push(`<h3>${applyInlineMarkdown(raw.slice(3))}</h3>`)
+      i += 1
+      continue
+    }
+    if (raw.startsWith('# ')) {
+      blocks.push(`<h2>${applyInlineMarkdown(raw.slice(2))}</h2>`)
+      i += 1
+      continue
+    }
+
+    if (/^\d+\.\s+/.test(raw)) {
+      const items = []
+      while (i < lines.length) {
+        const line = lines[i].trim()
+        if (!/^\d+\.\s+/.test(line)) break
+        items.push(`<li>${applyInlineMarkdown(line.replace(/^\d+\.\s+/, ''))}</li>`)
+        i += 1
+      }
+      blocks.push(`<ol>${items.join('')}</ol>`)
+      continue
+    }
+
+    if (/^[-*]\s+/.test(raw)) {
+      const items = []
+      while (i < lines.length) {
+        const line = lines[i].trim()
+        if (!/^[-*]\s+/.test(line)) break
+        items.push(`<li>${applyInlineMarkdown(line.replace(/^[-*]\s+/, ''))}</li>`)
+        i += 1
+      }
+      blocks.push(`<ul>${items.join('')}</ul>`)
+      continue
+    }
+
+    const paras = []
+    while (i < lines.length) {
+      const line = lines[i].trim()
+      if (!line || line.startsWith('#') || /^\d+\.\s+/.test(line) || /^[-*]\s+/.test(line)) break
+      paras.push(applyInlineMarkdown(line))
+      i += 1
+    }
+    blocks.push(`<p>${paras.join('<br>')}</p>`)
+  }
+
+  return blocks.join('')
+}
+
+function escapeHtml(text) {
+  return text
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;')
+}
+
+function applyInlineMarkdown(text) {
+  return text
+    .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+    .replace(/\*(.+?)\*/g, '<em>$1</em>')
 }
 
 async function fetchConversations() {
@@ -270,16 +341,19 @@ onMounted(() => {
 
 <style scoped lang="scss">
 .qna-page {
-  height: calc(100vh - 140px);
+  height: calc(100vh - 96px);
+  min-height: 0;
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 8px;
+  overflow: hidden;
 }
 
 .qna-toolbar {
   display: flex;
   justify-content: flex-end;
   gap: 8px;
+  flex-shrink: 0;
 }
 
 .qna-layout {
@@ -288,6 +362,7 @@ onMounted(() => {
   gap: 12px;
   min-height: 0;
   flex: 1;
+  overflow: hidden;
 }
 
 .qna-layout.collapsed {
@@ -362,6 +437,7 @@ onMounted(() => {
   background: var(--surface-1);
   border-radius: var(--radius-lg);
   min-height: 0;
+  height: 100%;
   overflow: hidden;
 }
 
@@ -463,6 +539,23 @@ onMounted(() => {
   color: var(--text-primary);
 }
 
+.message-text :deep(h2),
+.message-text :deep(h3),
+.message-text :deep(h4) {
+  margin: 8px 0 6px;
+  line-height: 1.4;
+}
+
+.message-text :deep(p) {
+  margin: 6px 0;
+}
+
+.message-text :deep(ol),
+.message-text :deep(ul) {
+  margin: 6px 0;
+  padding-left: 20px;
+}
+
 .user .message-text {
   background: var(--primary);
   color: #fff;
@@ -557,8 +650,8 @@ onMounted(() => {
 
 @media (max-width: 991px) {
   .qna-page {
-    height: auto;
-    min-height: calc(100vh - 140px);
+    height: calc(100vh - 96px);
+    min-height: 0;
   }
 
   .chat-header {

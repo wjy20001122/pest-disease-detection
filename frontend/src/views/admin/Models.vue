@@ -1,7 +1,5 @@
 <template>
   <div class="admin-page">
-    <PageHeader title="模型运维" subtitle="配置模型启停、默认策略与回退提示" />
-
     <el-table :data="models" border stripe>
       <el-table-column prop="model_key" label="模型Key" min-width="130" />
       <el-table-column prop="display_name" label="模型名称" min-width="180">
@@ -57,7 +55,6 @@
 import { computed, onMounted, ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import { adminApi } from '@/api'
-import PageHeader from '@/components/ui/PageHeader.vue'
 
 const models = ref([])
 

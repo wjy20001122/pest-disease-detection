@@ -1,7 +1,5 @@
 <template>
   <div class="overview-page">
-    <PageHeader title="管理概览" subtitle="系统指标、检测结构与队列健康" />
-
     <div class="metric-grid">
       <MetricCard label="用户总数" :value="dashboard.total_users || 0" :icon="UserFilled" />
       <MetricCard label="检测总数" :value="dashboard.total_detections || 0" :icon="DataLine" />
@@ -48,7 +46,6 @@
 <script setup>
 import { onMounted, reactive } from 'vue'
 import { adminApi } from '@/api'
-import PageHeader from '@/components/ui/PageHeader.vue'
 import MetricCard from '@/components/ui/MetricCard.vue'
 import DataPanel from '@/components/ui/DataPanel.vue'
 import StatusBadge from '@/components/ui/StatusBadge.vue'

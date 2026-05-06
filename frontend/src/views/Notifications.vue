@@ -1,13 +1,8 @@
 <template>
   <div class="notifications-page">
-    <PageHeader title="通知中心" subtitle="查看系统消息、预警推送与智能体审查通知">
-      <template #actions>
-        <el-button size="small" :disabled="!unreadCount" @click="markAllRead">全部已读</el-button>
-      </template>
-    </PageHeader>
-
     <div class="page-header">
       <h2>消息中心</h2>
+      <el-button size="small" :disabled="!unreadCount" @click="markAllRead">全部已读</el-button>
     </div>
 
     <!-- 筛选标签 -->
@@ -64,7 +59,6 @@ import { ElMessage } from 'element-plus'
 import { useRouter } from 'vue-router'
 import { notificationApi } from '@/api'
 import { io } from 'socket.io-client'
-import PageHeader from '@/components/ui/PageHeader.vue'
 
 const router = useRouter()
 const list = ref([])

@@ -83,6 +83,7 @@ export const detectionApi = {
   cameraStream: () => `${request.defaults.baseURL}/detection/camera/stream`,
   cameraStop: () => request.post('/detection/camera/stop'),
   history: (params) => request.get('/detection/history', { params }),
+  clearHistory: () => request.delete('/detection/history'),
   detail: (id, detectionType) => request.get(`/detection/${id}`, { params: { detection_type: detectionType } }),
   stats: (params) => request.get('/detection/stats/overview', { params }),
   statsOverview: (params) => request.get('/detection/stats/overview', { params })

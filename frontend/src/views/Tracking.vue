@@ -1,7 +1,5 @@
 <template>
   <div class="tracking-page">
-    <PageHeader title="虫害跟踪" subtitle="创建和维护跟踪任务，观察处理进展" />
-
     <div class="page-header">
       <el-button type="primary" @click="showCreateDialog = true">
         + 创建跟踪任务
@@ -174,7 +172,6 @@ import { computed, ref, reactive, onMounted, watch } from 'vue'
 import { ElMessage } from 'element-plus'
 import { UploadFilled } from '@element-plus/icons-vue'
 import { trackingApi, detectionApi } from '@/api'
-import PageHeader from '@/components/ui/PageHeader.vue'
 
 const list = ref([])
 const filter = reactive({ status: '' })

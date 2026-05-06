@@ -31,12 +31,19 @@
 
 ## 本地开发启动
 
+默认开发环境：WSL + Python 3.11 + Conda 环境 `pest_detect`。后端相关命令均建议在该环境内执行。
+
+### 0) 一键启动开发全栈（推荐，含前端/后端/Redis/Celery）
+
+```bash
+./scripts/dev_start.sh
+```
+
 ### 1) 启动后端（8000）
 
 ```bash
 cd backend
-python3 -m venv .venv
-source .venv/bin/activate
+conda activate pest_detect
 pip install -r requirements.txt
 python3 -m uvicorn app.main:app --host 0.0.0.0 --port 8000
 ```
@@ -45,7 +52,7 @@ python3 -m uvicorn app.main:app --host 0.0.0.0 --port 8000
 
 ```bash
 cd backend
-source .venv/bin/activate
+conda activate pest_detect
 celery -A app.tasks.celery_app.celery_app worker --loglevel=INFO --pool=threads --concurrency=1
 ```
 
@@ -69,3 +76,20 @@ npm run dev -- --host 0.0.0.0 --port 3000
 - AI（可选增强）：`DEEPSEEK_API_KEY`
 
 > 未启动 Redis/Celery 时，视频任务会按当前设计快速失败并返回明确错误。
+
+---
+
+## 视频处理依赖
+
+视频检测功能需要系统安装 `ffmpeg`：
+
+```bash
+# Ubuntu/Debian
+sudo apt update && sudo apt install ffmpeg -y
+
+# CentOS/RHEL
+sudo yum install ffmpeg -y
+
+# macOS (Homebrew)
+brew install ffmpeg
+```
