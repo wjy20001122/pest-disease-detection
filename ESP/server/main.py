@@ -12,6 +12,8 @@ from .config import settings
 class StartRequest(BaseModel):
     udp_host: str | None = Field(None, description="UDP bind host, defaults to ESP_UDP_HOST")
     udp_port: int | None = Field(None, ge=1, le=65535, description="UDP bind port")
+    esp32_ip: str | None = Field(None, description="Optional ESP32-CAM IP. When set, backend sends start:<udp_port> to it.")
+    esp32_cmd_port: int | None = Field(None, ge=1, le=65535, description="ESP32 command UDP port, defaults to 81")
 
 
 app = FastAPI(title=settings.app_name)
@@ -36,12 +38,34 @@ def health():
 @app.post("/camera/start")
 def start_camera(payload: StartRequest | None = None):
     payload = payload or StartRequest()
-    return camera_service.start(payload.udp_host, payload.udp_port)
+    result = camera_service.start(payload.udp_host, payload.udp_port)
+    esp32_ip = payload.esp32_ip or settings.esp32_ip
+    if esp32_ip:
+        camera_service.send_esp32_command(
+            esp32_ip,
+            f"start:{result['udp_port']}",
+            payload.esp32_cmd_port or settings.esp32_cmd_port,
+        )
+        result["esp32_command"] = f"start:{result['udp_port']}"
+        result["esp32_ip"] = esp32_ip
+    return result
 
 
 @app.post("/camera/stop")
-def stop_camera():
-    return camera_service.stop()
+def stop_camera(payload: StartRequest | None = None):
+    payload = payload or StartRequest()
+    esp32_ip = payload.esp32_ip or settings.esp32_ip
+    if esp32_ip:
+        camera_service.send_esp32_command(
+            esp32_ip,
+            "stop",
+            payload.esp32_cmd_port or settings.esp32_cmd_port,
+        )
+    result = camera_service.stop()
+    if esp32_ip:
+        result["esp32_command"] = "stop"
+        result["esp32_ip"] = esp32_ip
+    return result
 
 
 @app.get("/camera/status")

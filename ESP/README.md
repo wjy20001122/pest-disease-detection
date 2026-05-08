@@ -1,6 +1,6 @@
 # ESP 独立本地实时检测
 
-`ESP/` 是独立于主 `backend/` 的本地边缘实时检测项目。ESP32-CAM 通过 WiFi 使用 UDP 发送 JPEG 分包到小主机，小主机本地重组、ONNX 推理，并通过 FastAPI 输出 MJPEG 给 PySide6 Qt 客户端显示。
+`ESP/` 是独立于主 `backend/` 的本地边缘实时检测项目。ESP32-CAM 通过 WiFi 等待小主机 UDP 命令，收到 `start:<port>` 后发送 JPEG 分包到小主机，小主机本地重组、ONNX 推理，并通过 FastAPI 输出 MJPEG 给 PySide6 Qt 客户端显示。
 
 ## 目录
 
@@ -54,10 +54,26 @@ python3 -m qt_client.main
 
 - `WIFI_SSID`
 - `WIFI_PASSWORD`
-- `HOST_IP`：小主机局域网 IP
-- `HOST_PORT`：默认 `9000`
+- `LOCAL_IP/GATEWAY/SUBNET/DNS`：ESP32-CAM 固定 IP 配置
+- `COMMAND_PORT`：默认 `81`，用于接收小主机 `start:<port>` / `stop` 命令
 
-烧录后串口会输出 WiFi 地址和帧发送计数。
+烧录后串口会输出 WiFi 地址，并等待后端发送 `start:<port>`。
+
+启动 UDP 接收并通知 ESP32-CAM：
+
+```bash
+curl -X POST http://127.0.0.1:8010/camera/start \
+  -H "Content-Type: application/json" \
+  -d '{"esp32_ip":"10.107.67.6","esp32_cmd_port":81,"udp_port":9000}'
+```
+
+停止：
+
+```bash
+curl -X POST http://127.0.0.1:8010/camera/stop \
+  -H "Content-Type: application/json" \
+  -d '{"esp32_ip":"10.107.67.6","esp32_cmd_port":81}'
+```
 
 ## UDP 协议
 

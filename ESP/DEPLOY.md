@@ -1,6 +1,6 @@
 # ESP32-CAM 本地实时检测部署文档
 
-本文档用于把 `ESP/` 独立项目部署到嗨高乐小主机。数据只在局域网内流转：ESP32-CAM 通过 WiFi UDP 发送 JPEG 分包到小主机，小主机本地检测，Qt 界面实时显示。
+本文档用于把 `ESP/` 独立项目部署到嗨高乐小主机。数据只在局域网内流转：ESP32-CAM 通过 WiFi 等待小主机 UDP 命令，收到 `start:<port>` 后发送 JPEG 分包到小主机，小主机本地检测，Qt 界面实时显示。
 
 ## 1. 部署前准备
 
@@ -23,7 +23,7 @@
 ip addr
 ```
 
-找到 WiFi 网卡的局域网地址，例如 `192.168.1.100`。后面固件里的 `HOST_IP` 要填这个地址。
+找到 WiFi 网卡的局域网地址，例如 `10.107.67.5`。ESP32-CAM 固件里配置自己的固定 IP，例如 `10.107.67.6`，小主机启动接口里传这个 ESP32 IP。
 
 ## 2. 安装小主机依赖
 
@@ -72,7 +72,9 @@ curl http://127.0.0.1:8010/camera/status
 启动 UDP 接收：
 
 ```bash
-curl -X POST http://127.0.0.1:8010/camera/start -H "Content-Type: application/json" -d '{}'
+curl -X POST http://127.0.0.1:8010/camera/start \
+  -H "Content-Type: application/json" \
+  -d '{"esp32_ip":"10.107.67.6","esp32_cmd_port":81,"udp_port":9000}'
 ```
 
 默认监听：
@@ -93,8 +95,11 @@ ESP/firmware/esp32_cam_udp/esp32_cam_udp.ino
 ```cpp
 const char* WIFI_SSID = "YOUR_WIFI_SSID";
 const char* WIFI_PASSWORD = "YOUR_WIFI_PASSWORD";
-const char* HOST_IP = "192.168.1.100";
-const uint16_t HOST_PORT = 9000;
+IPAddress LOCAL_IP(10, 107, 67, 6);
+IPAddress GATEWAY(10, 107, 67, 1);
+IPAddress SUBNET(255, 255, 255, 0);
+IPAddress DNS(8, 8, 8, 8);
+const uint16_t COMMAND_PORT = 81;
 ```
 
 Arduino IDE 设置：
@@ -107,10 +112,19 @@ Arduino IDE 设置：
 烧录后打开串口监视器，波特率 `115200`。正常输出应包含：
 
 ```text
-WiFi connected: 192.168.x.x
-Sending UDP JPEG packets to 192.168.x.x:9000
-frame=0 bytes=...
-frame=1 bytes=...
+[OK] WiFi connected
+[INFO] ESP32-CAM IP: 10.107.67.6
+[INFO] Waiting for backend start command...
+[OK] UDP command listener started, port: 81
+[INFO] Expected commands: start:<port> / stop
+```
+
+当小主机调用 `/camera/start` 后，串口应继续输出：
+
+```text
+[INFO] Command received: start:9000
+[OK] Streaming to 10.107.67.x:9000
+[INFO] frame=0 bytes=...
 ```
 
 ## 5. 启动 Qt 实时界面
@@ -210,6 +224,7 @@ curl http://127.0.0.1:8010/camera/status
 ```
 
 如果 `received_packets` 一直为 `0`，通常是 IP、WiFi、端口或防火墙问题。
+如果 ESP32 串口一直停在“Waiting for backend start command”，说明小主机没有成功向 ESP32 的 UDP `81` 端口发送 `start:<port>`。
 
 画面卡顿：
 
@@ -236,6 +251,14 @@ Qt 没有画面：
 
 ```bash
 curl -X POST http://127.0.0.1:8010/camera/stop
+```
+
+如果要同时通知 ESP32-CAM 停止发送：
+
+```bash
+curl -X POST http://127.0.0.1:8010/camera/stop \
+  -H "Content-Type: application/json" \
+  -d '{"esp32_ip":"10.107.67.6","esp32_cmd_port":81}'
 ```
 
 停止 FastAPI：

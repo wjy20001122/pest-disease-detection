@@ -22,15 +22,22 @@
 
 const char* WIFI_SSID = "YOUR_WIFI_SSID";
 const char* WIFI_PASSWORD = "YOUR_WIFI_PASSWORD";
-const char* HOST_IP = "192.168.1.100";
-const uint16_t HOST_PORT = 9000;
+IPAddress LOCAL_IP(10, 107, 67, 6);
+IPAddress GATEWAY(10, 107, 67, 1);
+IPAddress SUBNET(255, 255, 255, 0);
+IPAddress DNS(8, 8, 8, 8);
+const uint16_t COMMAND_PORT = 81;
 
 const uint16_t PACKET_PAYLOAD_SIZE = 1200;
 const uint32_t FRAME_INTERVAL_MS = 125;  // ~8 FPS
 const uint8_t JPEG_QUALITY = 18;         // Lower is better quality. 10-20 is a practical range.
 
 WiFiUDP udp;
+WiFiUDP command_udp;
+IPAddress host_ip;
+uint16_t host_port = 9000;
 uint32_t frame_id = 0;
+bool streaming = false;
 
 struct __attribute__((packed)) PacketHeader {
   char magic[4];
@@ -95,15 +102,68 @@ bool setupCamera() {
 
 void connectWiFi() {
   WiFi.mode(WIFI_STA);
+  if (!WiFi.config(LOCAL_IP, GATEWAY, SUBNET, DNS)) {
+    Serial.println("[WARN] Failed to configure static IP");
+  } else {
+    Serial.print("[INFO] Static IP configured: ");
+    Serial.println(LOCAL_IP);
+  }
   WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
-  Serial.print("Connecting WiFi");
+  Serial.print("[INFO] Connecting WiFi: ");
+  Serial.println(WIFI_SSID);
   while (WiFi.status() != WL_CONNECTED) {
     delay(500);
     Serial.print(".");
   }
   Serial.println();
-  Serial.print("WiFi connected: ");
+  Serial.println("[OK] WiFi connected");
+  Serial.print("[INFO] ESP32-CAM IP: ");
   Serial.println(WiFi.localIP());
+}
+
+void handleCommand() {
+  int packet_size = command_udp.parsePacket();
+  if (packet_size <= 0) {
+    return;
+  }
+
+  char command[64];
+  int len = command_udp.read(command, sizeof(command) - 1);
+  if (len <= 0) {
+    return;
+  }
+  command[len] = '\0';
+
+  String value = String(command);
+  value.trim();
+  Serial.print("[INFO] Command received: ");
+  Serial.println(value);
+
+  if (value.startsWith("start")) {
+    int colon = value.indexOf(':');
+    if (colon >= 0) {
+      int requested_port = value.substring(colon + 1).toInt();
+      if (requested_port > 0 && requested_port <= 65535) {
+        host_port = (uint16_t)requested_port;
+      }
+    }
+    host_ip = command_udp.remoteIP();
+    streaming = true;
+    frame_id = 0;
+    Serial.print("[OK] Streaming to ");
+    Serial.print(host_ip);
+    Serial.print(":");
+    Serial.println(host_port);
+    return;
+  }
+
+  if (value == "stop") {
+    streaming = false;
+    Serial.println("[OK] Streaming stopped");
+    return;
+  }
+
+  Serial.println("[WARN] Unknown command. Expected start:<port> or stop");
 }
 
 void sendFrame(camera_fb_t* fb) {
@@ -136,7 +196,7 @@ void sendFrame(camera_fb_t* fb) {
     memcpy(packet, &header, sizeof(PacketHeader));
     memcpy(packet + sizeof(PacketHeader), fb->buf + offset, payload_size);
 
-    udp.beginPacket(HOST_IP, HOST_PORT);
+    udp.beginPacket(host_ip, host_port);
     udp.write(packet, sizeof(PacketHeader) + payload_size);
     udp.endPacket();
     delayMicroseconds(800);
@@ -153,10 +213,20 @@ void setup() {
     ESP.restart();
   }
   udp.begin(0);
-  Serial.printf("Sending UDP JPEG packets to %s:%u\n", HOST_IP, HOST_PORT);
+  command_udp.begin(COMMAND_PORT);
+  Serial.println("[INFO] Waiting for backend start command...");
+  Serial.printf("[OK] UDP command listener started, port: %u\n", COMMAND_PORT);
+  Serial.println("[INFO] Expected commands: start:<port> / stop");
 }
 
 void loop() {
+  handleCommand();
+
+  if (!streaming) {
+    delay(20);
+    return;
+  }
+
   static uint32_t last_frame_at = 0;
   uint32_t now = millis();
   if (now - last_frame_at < FRAME_INTERVAL_MS) {
@@ -176,7 +246,7 @@ void loop() {
   }
 
   sendFrame(fb);
-  Serial.printf("frame=%lu bytes=%u\n", (unsigned long)frame_id, fb->len);
+  Serial.printf("[INFO] frame=%lu bytes=%u target=%s:%u\n", (unsigned long)frame_id, fb->len, host_ip.toString().c_str(), host_port);
   frame_id++;
   esp_camera_fb_return(fb);
 }

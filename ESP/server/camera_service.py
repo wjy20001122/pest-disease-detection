@@ -73,6 +73,13 @@ class CameraService:
             return self.status()
         return self.status()
 
+    def send_esp32_command(self, esp32_ip: str, command: str, esp32_cmd_port: int = settings.esp32_cmd_port) -> None:
+        if not esp32_ip:
+            return
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as cmd_sock:
+            cmd_sock.settimeout(1.0)
+            cmd_sock.sendto(command.encode("utf-8"), (esp32_ip, esp32_cmd_port))
+
     def stop(self) -> dict[str, Any]:
         with self.lock:
             self.running = False

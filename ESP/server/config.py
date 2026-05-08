@@ -13,6 +13,8 @@ class Settings:
     app_name: str = "ESP Local Realtime Detection"
     udp_host: str = os.getenv("ESP_UDP_HOST", "0.0.0.0")
     udp_port: int = int(os.getenv("ESP_UDP_PORT", "9000"))
+    esp32_ip: str = os.getenv("ESP32_IP", "").strip()
+    esp32_cmd_port: int = int(os.getenv("ESP32_CMD_PORT", "81"))
     frame_timeout_sec: float = float(os.getenv("ESP_FRAME_TIMEOUT_SEC", "1.0"))
     stale_frame_sec: float = float(os.getenv("ESP_STALE_FRAME_SEC", "3.0"))
     max_frame_bytes: int = int(os.getenv("ESP_MAX_FRAME_BYTES", str(300 * 1024)))
