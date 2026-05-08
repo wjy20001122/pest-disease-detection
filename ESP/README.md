@@ -37,6 +37,8 @@ cd ESP
 python3 -m qt_client.main
 ```
 
+Qt 默认 ESP32 IP 为 `10.107.67.6`、命令端口 `81`、小主机 UDP 接收端口 `9000`。点击“启动接收”会自动调用后端并向 ESP32-CAM 发送 `start:9000`。
+
 服务接口：
 
 - `GET /health`

@@ -1,8 +1,6 @@
 from __future__ import annotations
 
-import json
 import sys
-import time
 
 import requests
 from PySide6.QtCore import QThread, QTimer, Signal, Qt
@@ -69,6 +67,9 @@ class MainWindow(QMainWindow):
         self.worker: MjpegWorker | None = None
 
         self.base_url_input = QLineEdit("http://127.0.0.1:8010")
+        self.esp32_ip_input = QLineEdit("10.107.67.6")
+        self.esp32_cmd_port_input = QLineEdit("81")
+        self.udp_port_input = QLineEdit("9000")
         self.status_label = QLabel("未连接")
         self.status_label.setAlignment(Qt.AlignCenter)
         self.video_label = QLabel("等待视频流")
@@ -89,11 +90,17 @@ class MainWindow(QMainWindow):
         top = QGridLayout()
         top.addWidget(QLabel("FastAPI 服务"), 0, 0)
         top.addWidget(self.base_url_input, 0, 1)
+        top.addWidget(QLabel("ESP32 IP"), 1, 0)
+        top.addWidget(self.esp32_ip_input, 1, 1)
+        top.addWidget(QLabel("命令端口"), 1, 2)
+        top.addWidget(self.esp32_cmd_port_input, 1, 3)
+        top.addWidget(QLabel("接收端口"), 2, 0)
+        top.addWidget(self.udp_port_input, 2, 1)
         buttons = QHBoxLayout()
         buttons.addWidget(self.start_button)
         buttons.addWidget(self.stop_button)
-        top.addLayout(buttons, 0, 2)
-        top.addWidget(self.status_label, 0, 3)
+        top.addLayout(buttons, 2, 2)
+        top.addWidget(self.status_label, 2, 3)
         top.setColumnStretch(1, 1)
 
         main_area = QHBoxLayout()
@@ -114,10 +121,18 @@ class MainWindow(QMainWindow):
     def base_url(self) -> str:
         return self.base_url_input.text().strip().rstrip("/")
 
+    def command_payload(self) -> dict:
+        payload = {
+            "esp32_ip": self.esp32_ip_input.text().strip(),
+            "esp32_cmd_port": int(self.esp32_cmd_port_input.text().strip() or "81"),
+            "udp_port": int(self.udp_port_input.text().strip() or "9000"),
+        }
+        return payload
+
     def start_camera(self) -> None:
         base_url = self.base_url()
         try:
-            response = requests.post(f"{base_url}/camera/start", json={}, timeout=5)
+            response = requests.post(f"{base_url}/camera/start", json=self.command_payload(), timeout=5)
             response.raise_for_status()
         except Exception as exc:
             QMessageBox.warning(self, "启动失败", str(exc))
@@ -140,7 +155,7 @@ class MainWindow(QMainWindow):
             self.worker.wait(1500)
             self.worker = None
         try:
-            requests.post(f"{base_url}/camera/stop", timeout=3)
+            requests.post(f"{base_url}/camera/stop", json=self.command_payload(), timeout=3)
         except Exception:
             pass
         self.start_button.setEnabled(True)
