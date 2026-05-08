@@ -12,8 +12,8 @@
 
 软件：
 
-- Conda 环境：`pest_detect`
-- Python 3.11
+- Windows 原生 Python 3.11 + `esp` 虚拟环境，推荐用于 ESP32-CAM UDP 实机联调
+- Linux/小主机也可使用 Conda 环境：`pest_detect`
 - Arduino IDE 或 Arduino CLI
 - ESP32 Arduino Board 支持包
 
@@ -25,7 +25,95 @@ ip addr
 
 找到 WiFi 网卡的局域网地址，例如 `10.107.67.5`。ESP32-CAM 固件里配置自己的固定 IP，例如 `10.107.67.6`，小主机启动接口里传这个 ESP32 IP。
 
-## 2. 安装小主机依赖
+## 2. Windows 原生 esp 环境部署（推荐实机联调）
+
+ESP32-CAM 的 UDP 图像包要回到运行 FastAPI 的系统。Windows + WSL 场景下，ESP32 常把包发到 Windows 网卡，WSL 内服务收不到。因此实机联调建议在 Windows 原生 PowerShell 中启动 `ESP/server`。
+
+安装 Python 3.11：
+
+```powershell
+winget install -e --id Python.Python.3.11
+```
+
+关闭并重新打开 PowerShell 后检查：
+
+```powershell
+py -3.11 --version
+python --version
+```
+
+创建并激活名为 `esp` 的虚拟环境：
+
+```powershell
+cd D:\Will\Program\pest-disease-detection\ESP
+py -3.11 -m venv esp
+.\esp\Scripts\Activate.ps1
+```
+
+如果 PowerShell 阻止激活脚本，执行一次：
+
+```powershell
+Set-ExecutionPolicy -Scope CurrentUser RemoteSigned
+.\esp\Scripts\Activate.ps1
+```
+
+安装依赖：
+
+```powershell
+python -m pip install --upgrade pip
+pip install -r requirements.txt
+```
+
+启动 FastAPI：
+
+```powershell
+python -m uvicorn server.main:app --host 0.0.0.0 --port 8010
+```
+
+Windows 防火墙弹窗时，允许专用网络访问。
+
+另开一个 PowerShell，测试 ESP32 启动命令：
+
+```powershell
+curl.exe -X POST http://127.0.0.1:8010/camera/start `
+  -H "Content-Type: application/json" `
+  -d "{\"esp32_ip\":\"10.107.67.6\",\"esp32_cmd_port\":81,\"udp_port\":9000}"
+```
+
+查看状态：
+
+```powershell
+curl.exe http://127.0.0.1:8010/camera/status
+```
+
+如果 `received_packets` 增加，说明 Windows 原生 UDP 收包正常。
+
+启动 Qt：
+
+```powershell
+cd D:\Will\Program\pest-disease-detection\ESP
+.\esp\Scripts\Activate.ps1
+python -m qt_client.main
+```
+
+## 3. Windows EXE 打包部署
+
+如果希望交付一个完整可运行目录，可以在 Windows PowerShell 中构建 exe：
+
+```powershell
+cd D:\Will\Program\pest-disease-detection\ESP
+.\scripts\build_windows.ps1
+```
+
+产物：
+
+```text
+D:\Will\Program\pest-disease-detection\ESP\dist\ESP-Edge\ESP-Edge.exe
+```
+
+运行 `ESP-Edge.exe` 后会自动启动后台 FastAPI/UDP 服务，并打开 Qt 界面。整个 `dist\ESP-Edge\` 目录需要一起复制，不能只复制单个 exe。详细说明见 `BUILD_WINDOWS.md`。
+
+## 4. Linux/Conda 部署
 
 进入项目：
 
@@ -48,7 +136,7 @@ ls -lh models/
 
 默认服务使用 `models/yolo12.onnx`。
 
-## 3. 启动 FastAPI 检测服务
+## 5. 启动 FastAPI 检测服务
 
 ```bash
 cd /mnt/d/Will/Program/pest-disease-detection/ESP
@@ -82,7 +170,7 @@ curl -X POST http://127.0.0.1:8010/camera/start \
 - UDP：`0.0.0.0:9000`
 - HTTP：`0.0.0.0:8010`
 
-## 4. 烧录 ESP32-CAM 固件
+## 6. 烧录 ESP32-CAM 固件
 
 打开：
 
@@ -127,7 +215,7 @@ Arduino IDE 设置：
 [INFO] frame=0 bytes=...
 ```
 
-## 5. 启动 Qt 实时界面
+## 7. 启动 Qt 实时界面
 
 另开一个终端：
 
@@ -165,7 +253,7 @@ Qt 界面里的 ESP32 IP 默认是 `10.107.67.6`，命令端口默认 `81`，接
 http://127.0.0.1:8010/camera/frame.mjpg
 ```
 
-## 6. 开机自启动可选配置
+## 8. 开机自启动可选配置
 
 如果小主机使用 systemd，可以创建服务：
 
@@ -202,7 +290,7 @@ sudo systemctl status esp-edge
 
 Qt 界面通常建议登录桌面后手动启动；如果需要桌面自启动，再放到系统的 Startup Applications。
 
-## 7. 故障排查
+## 9. 故障排查
 
 服务无法启动：
 
@@ -227,6 +315,7 @@ curl http://127.0.0.1:8010/camera/status
 
 如果 `received_packets` 一直为 `0`，通常是 IP、WiFi、端口或防火墙问题。
 如果 ESP32 串口一直停在“Waiting for backend start command”，说明小主机没有成功向 ESP32 的 UDP `81` 端口发送 `start:<port>`。
+如果在 WSL 中运行服务，ESP32 串口显示正在发送帧但 `received_packets` 仍为 `0`，请切换到 Windows 原生 `esp` 环境运行 FastAPI。
 
 画面卡顿：
 
@@ -247,7 +336,7 @@ Qt 没有画面：
 - 如果浏览器有画面，重启 Qt 客户端
 - 如果浏览器也没有画面，优先检查 UDP 接收和 `/camera/status`
 
-## 8. 停止服务
+## 10. 停止服务
 
 停止摄像头接收：
 
@@ -272,7 +361,7 @@ curl -X POST http://127.0.0.1:8010/camera/stop \
 sudo systemctl stop esp-edge
 ```
 
-## 9. 数据边界
+## 11. 数据边界
 
 `ESP/` 独立项目不使用：
 

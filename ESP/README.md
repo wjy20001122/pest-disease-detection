@@ -10,22 +10,58 @@
 - `models/`：本地模型文件，已复制 `yolo12.onnx` 和 `deim2p3.onnx`
 - `config/`：本地环境变量示例
 - `scripts/`：启动脚本
+- `BUILD_WINDOWS.md`：Windows exe 打包说明
 
 ## 运行
 
-安装依赖：
+### Windows EXE 打包
+
+```powershell
+cd D:\Will\Program\pest-disease-detection\ESP
+.\scripts\build_windows.ps1
+```
+
+产物：
+
+```text
+dist\ESP-Edge\ESP-Edge.exe
+```
+
+完整说明见 `BUILD_WINDOWS.md`。
+
+### Windows 原生 esp 环境（推荐 ESP32-CAM 实机联调）
+
+```powershell
+winget install -e --id Python.Python.3.11
+cd D:\Will\Program\pest-disease-detection\ESP
+py -3.11 -m venv esp
+.\esp\Scripts\Activate.ps1
+python -m pip install --upgrade pip
+pip install -r requirements.txt
+python -m uvicorn server.main:app --host 0.0.0.0 --port 8010
+```
+
+如果 PowerShell 阻止激活脚本：
+
+```powershell
+Set-ExecutionPolicy -Scope CurrentUser RemoteSigned
+.\esp\Scripts\Activate.ps1
+```
+
+另开 PowerShell 启动 Qt：
+
+```powershell
+cd D:\Will\Program\pest-disease-detection\ESP
+.\esp\Scripts\Activate.ps1
+python -m qt_client.main
+```
+
+### Linux/Conda
 
 ```bash
 conda activate pest_detect
 cd ESP
 pip install -r requirements.txt
-```
-
-启动服务：
-
-```bash
-conda activate pest_detect
-cd ESP
 python3 -m uvicorn server.main:app --host 0.0.0.0 --port 8010
 ```
 
