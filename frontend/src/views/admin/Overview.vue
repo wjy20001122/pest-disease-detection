@@ -12,7 +12,6 @@
         <div class="rows">
           <div class="row"><span>图像检测</span><strong>{{ dashboard.detection_breakdown?.image || 0 }}</strong></div>
           <div class="row"><span>视频检测</span><strong>{{ dashboard.detection_breakdown?.video || 0 }}</strong></div>
-          <div class="row"><span>摄像头检测</span><strong>{{ dashboard.detection_breakdown?.camera || 0 }}</strong></div>
         </div>
       </DataPanel>
 
@@ -56,7 +55,7 @@ const dashboard = reactive({
   total_detections: 0,
   active_alerts: 0,
   enabled_models: 0,
-  detection_breakdown: { image: 0, video: 0, camera: 0 }
+  detection_breakdown: { image: 0, video: 0 }
 })
 
 const queueMetrics = reactive({

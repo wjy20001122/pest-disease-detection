@@ -55,9 +55,11 @@
 import { ref, onMounted, nextTick, onBeforeUnmount } from 'vue'
 import * as echarts from 'echarts'
 import { detectionApi } from '@/api'
+import { useUserStore } from '@/stores/user'
 import MetricCard from '@/components/ui/MetricCard.vue'
 import { Aim, DataLine, WarningFilled } from '@element-plus/icons-vue'
 
+const userStore = useUserStore()
 const period = ref('month')
 const dateRange = ref([])
 const stats = ref({})
@@ -75,7 +77,9 @@ async function fetchStats() {
       params.start_date = dateRange.value[0].toISOString().split('T')[0]
       params.end_date = dateRange.value[1].toISOString().split('T')[0]
     }
-    const res = await detectionApi.statsOverview(params)
+    const res = userStore.isAdmin
+      ? await detectionApi.stats(params)
+      : await detectionApi.statsOverview(params)
     stats.value = res.data || res
     updateCharts()
   } catch (e) {
@@ -96,7 +100,7 @@ function updateTrendChart() {
     trendChartInstance = echarts.init(trendChart.value)
   }
 
-  const trendData = stats.value.trend_data || []
+  const trendData = stats.value.trend_data || stats.value.daily_trend || []
   const dates = trendData.map((d) => d.date)
   const counts = trendData.map((d) => d.count)
 
@@ -125,7 +129,7 @@ function updatePieChart() {
     pieChartInstance = echarts.init(pieChart.value)
   }
 
-  const distribution = stats.value.pest_distribution || []
+  const distribution = stats.value.pest_distribution || stats.value.disease_distribution || []
   const colors = ['#22c55e', '#3b82f6', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899']
 
   pieChartInstance.setOption({
@@ -151,7 +155,8 @@ function updatePieChart() {
 }
 
 function getBarWidth(count) {
-  const max = Math.max(...(stats.value.pest_distribution || []).map((d) => d.count), 1)
+  const distribution = stats.value.pest_distribution || stats.value.disease_distribution || []
+  const max = Math.max(...distribution.map((d) => d.count), 1)
   return (count / max) * 100
 }
 

@@ -15,7 +15,6 @@ from .oss_confg import (
     OSS_DOMAIN,
     OSS_IMG_PATH,
     OSS_VIDEO_PATH,
-    OSS_CAMERA_PATH,
     OSS_AVATAR,
     USE_OSS
 )
@@ -52,7 +51,6 @@ class OSSUploader:
         path_map = {
             'img_predict': OSS_IMG_PATH,
             'video_predict': OSS_VIDEO_PATH,
-            'camera_predict': OSS_CAMERA_PATH,
             'avatar': OSS_AVATAR
         }
         return path_map.get(category, OSS_IMG_PATH)
@@ -63,7 +61,7 @@ class OSSUploader:
 
         Args:
             file_path_or_array: 本地文件路径或numpy数组
-            category: 文件分类 (img_predict, video_predict, camera_predict, data_collection, avatar)
+            category: 文件分类 (img_predict, video_predict, data_collection, avatar)
             custom_filename: 自定义文件名，如果不提供则自动生成
 
         Returns:

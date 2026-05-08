@@ -109,6 +109,7 @@ class TrackerPredictor:
             'current_frame': defaultdict(int),
             'total_tracks': 0,
             'unique_ids': set(),
+            'class_unique_ids': defaultdict(set),
             'bayesian_stats': {},
         }
 
@@ -550,8 +551,13 @@ class TrackerPredictor:
             self.stats['current_frame'][label] += 1
             self.stats['total_counts'][label] += 1
             self.stats['unique_ids'].add(tid)
-        
+            self.stats['class_unique_ids'][label].add(tid)
+
         self.stats['total_tracks'] = len(self.stats['unique_ids'])
+        unique_track_counts = {
+            label: len(track_ids)
+            for label, track_ids in self.stats['class_unique_ids'].items()
+        }
         
         # 准备返回的 detections 列表用于数据采集
         detections = []
@@ -576,6 +582,7 @@ class TrackerPredictor:
                 'total_counts': dict(self.stats['total_counts']),
                 'current_frame': dict(self.stats['current_frame']),
                 'total_tracks': self.stats['total_tracks'],
+                'unique_track_counts': unique_track_counts,
                 'bayesian_stats': self.stats.get('bayesian_stats', {}),
             }
         }
@@ -668,5 +675,9 @@ class TrackerPredictor:
             'total_counts': dict(self.stats['total_counts']),
             'current_frame': dict(self.stats['current_frame']),
             'total_tracks': self.stats['total_tracks'],
+            'unique_track_counts': {
+                label: len(track_ids)
+                for label, track_ids in self.stats['class_unique_ids'].items()
+            },
             'bayesian_stats': self.stats.get('bayesian_stats', {}),
         }

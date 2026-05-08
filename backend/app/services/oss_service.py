@@ -16,8 +16,6 @@ class OSSService:
     CATEGORY_PREFIXES = {
         "img_predict": "corn-disease-detection/images",
         "video_predict": "corn-disease-detection/videos",
-        "camera_predict": "corn-disease-detection/camera",
-        "camera": "corn-disease-detection/camera",
         "avatar": "corn-disease-detection/avatars",
         "images": "corn-disease-detection/images",
         "videos": "corn-disease-detection/videos",

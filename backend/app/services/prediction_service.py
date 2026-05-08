@@ -3,7 +3,6 @@ from __future__ import annotations
 import json
 import logging
 import shutil
-import socket
 import subprocess
 import tempfile
 import threading
@@ -18,14 +17,13 @@ import cv2
 import numpy as np
 import requests
 from fastapi import UploadFile
-from fastapi.responses import JSONResponse, StreamingResponse
+from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 
 from app.core.config import FASTAPI_ROOT, REPO_ROOT, settings
 from app.services.data_collector import DataCollector
 from app.services.legacy_runtime import load_legacy_runtime
 from app.services.oss_service import oss_service
 from app.services.persistence import (
-    create_camera_record,
     create_data_collection_record,
     create_img_record,
     create_video_record,
@@ -64,19 +62,6 @@ class PredictionService:
         self.runtime = load_legacy_runtime()
         self.video_sessions: dict[str, VideoSession] = {}
         self.sessions_lock = threading.Lock()
-        self.camera_lock = threading.Lock()
-        self.camera_session: dict | None = None
-        self.recording = False
-        self.cap = None
-        self.tracker = None
-        self.current_kind = ""
-        self.current_conf = 0.5
-        self.esp32_socket = None
-        self.is_recording_video = False
-        self.recorded_frames: list[np.ndarray] = []
-        self.recorded_original_frames: list[np.ndarray] = []
-        self.camera_data_collector: DataCollector | None = None
-        self.camera_meta: JSONDict = {}
         self._started = False
         self._heartbeat_thread: threading.Thread | None = None
 
@@ -148,6 +133,27 @@ class PredictionService:
 
     def _cleanup_video_files(self, session: VideoSession) -> None:
         cleanup_temp_dir(str(session.temp_dir))
+        self._preview_frame_path(session.session_id).unlink(missing_ok=True)
+
+    def _preview_frame_path(self, session_id: str) -> Path:
+        preview_root = Path(tempfile.gettempdir()) / "pest_detect_video_previews"
+        preview_root.mkdir(parents=True, exist_ok=True)
+        return preview_root / f"{session_id}.jpg"
+
+    def _write_preview_frame(self, session_id: str, frame: np.ndarray) -> None:
+        ok, jpeg = cv2.imencode(".jpg", frame)
+        if not ok:
+            return
+        preview_path = self._preview_frame_path(session_id)
+        temp_path = preview_path.with_suffix(".tmp")
+        temp_path.write_bytes(jpeg.tobytes())
+        temp_path.replace(preview_path)
+
+    def get_video_preview_frame(self, session_id: str):
+        preview_path = self._preview_frame_path(session_id)
+        if not preview_path.exists():
+            return JSONResponse({"error": "Preview frame not ready"}, status_code=404)
+        return FileResponse(preview_path, media_type="image/jpeg")
 
     def get_models(self) -> JSONDict:
         model_items = []
@@ -606,6 +612,7 @@ class PredictionService:
                 original_frame = frame.copy()
                 results = session.tracker.track_frame(frame)
                 processed_frame = session.tracker.draw_detections(original_frame, results, show_stats=False)
+                self._write_preview_frame(task_session_id, processed_frame)
 
                 detections = results.get("detections", [])
                 for det in detections:
@@ -836,9 +843,10 @@ class PredictionService:
 
                 stats = results.get("stats", {})
                 progress = (frame_count / total_frames * 100) if total_frames > 0 else 0
+                unique_track_counts = stats.get("unique_track_counts", {}) or {}
                 session.data["progress"] = progress
                 session.data["frame_count"] = frame_count
-                session.data["total_counts"] = stats.get("total_counts", {})
+                session.data["total_counts"] = unique_track_counts
                 session.data["total_tracks"] = stats.get("total_tracks", 0)
                 session.data["detections"] = all_detections[-100:]
 
@@ -853,6 +861,7 @@ class PredictionService:
                             "progress": round(progress, 1),
                             "frame_count": frame_count,
                             "total_counts": session.data.get("total_counts", {}),
+                            "unique_track_counts": session.data.get("total_counts", {}),
                             "total_tracks": int(session.data.get("total_tracks", 0)),
                             "detections": list(session.data.get("detections", [])),
                             "keyframe_count": keyframe_count,
@@ -861,7 +870,8 @@ class PredictionService:
 
                 track_stats = {
                     "sessionId": task_session_id,
-                    "total_counts": stats.get("total_counts", {}),
+                    "total_counts": unique_track_counts,
+                    "unique_track_counts": unique_track_counts,
                     "current_frame": stats.get("current_frame", {}),
                     "total_tracks": stats.get("total_tracks", 0),
                     "class_count": sum(
@@ -894,6 +904,7 @@ class PredictionService:
                             "progress": round(float(session.data.get("progress", 0.0)), 1),
                             "frame_count": int(session.data.get("frame_count", 0)),
                             "total_counts": total_counts,
+                            "unique_track_counts": total_counts,
                             "total_tracks": total_tracks,
                             "detections": detections_tail,
                         }
@@ -902,6 +913,7 @@ class PredictionService:
                     "status": "stopped",
                     "frame_count": int(session.data.get("frame_count", 0)),
                     "total_counts": total_counts,
+                    "unique_track_counts": total_counts,
                     "total_tracks": total_tracks,
                     "detections": detections_tail,
                 }
@@ -948,6 +960,7 @@ class PredictionService:
                         "progress": 100.0,
                         "frame_count": int(session.data.get("frame_count", 0)),
                         "total_counts": total_counts,
+                        "unique_track_counts": total_counts,
                         "total_tracks": total_tracks,
                         "detections": detections_tail,
                         "output_url": uploaded_url,
@@ -959,6 +972,7 @@ class PredictionService:
                 "output_url": uploaded_url,
                 "frame_count": int(session.data.get("frame_count", 0)),
                 "total_counts": total_counts,
+                "unique_track_counts": total_counts,
                 "total_tracks": total_tracks,
                 "detections": detections_tail,
             }
@@ -1038,366 +1052,6 @@ class PredictionService:
                 return {"status": 200, "message": "Stopping all video processing", "code": 0}
         return {"status": 200, "message": "No active video processing", "code": 0}
 
-    def predict_camera(
-        self,
-        *,
-        model_key: str,
-        username: str,
-        start_time: str,
-        conf: str,
-        fps: str | None,
-        stream_source: str,
-        esp32_ip: str,
-        esp32_port: int,
-    ):
-        with self.camera_lock:
-            if self.camera_session and self.camera_session.get("is_processing"):
-                return self._json_error("Camera is already in use")
-            self.camera_session = {"is_processing": True, "stop_flag": False}
-
-        kind, model_name = self._resolve_kind(model_key)
-        model_config = self.runtime.config.get_model_config(kind)
-        conf_threshold = model_config.get("conf_threshold", float(conf or 0.5))
-        self.current_kind = kind
-        self.current_conf = conf_threshold
-        self.camera_meta = {
-            "username": username,
-            "weight": model_name,
-            "kind": kind,
-            "conf": conf_threshold,
-            "startTime": start_time,
-            "modelKey": model_key,
-            "fps": fps,
-            "streamSource": stream_source,
-            "esp32Ip": esp32_ip,
-            "esp32Port": esp32_port,
-        }
-
-        input_size = self.runtime.config.get_input_size(kind)
-        tracker_type = self.runtime.tracker_config.DEFAULT_TRACKER
-        tracker_config_dict = self.runtime.tracker_config.get_tracker_config(tracker_type)
-        configured_fps = int(fps) if fps and fps.isdigit() else int(tracker_config_dict.get("frame_rate", 30))
-
-        self.tracker = self.runtime.TrackerPredictor(
-            kind=kind,
-            conf=conf_threshold,
-            tracker_type=tracker_type,
-            reset_id=True,
-        )
-
-        is_esp32 = stream_source == "esp32" and bool(esp32_ip)
-        if is_esp32:
-            self._send_esp32_command(esp32_ip, 81, "start", video_port=esp32_port)
-            self.esp32_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-            self.esp32_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-            self.esp32_socket.bind(("0.0.0.0", esp32_port))
-            self.cap = None
-        else:
-            self.cap = cv2.VideoCapture(0)
-            self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, input_size[1])
-            self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, input_size[0])
-            self.cap.set(cv2.CAP_PROP_FPS, configured_fps)
-            if not self.cap.isOpened():
-                self.cap.release()
-                self.cap = None
-                with self.camera_lock:
-                    if self.camera_session:
-                        self.camera_session["is_processing"] = False
-                return self._json_error("Unable to open local camera", status_code=500, code=500)
-
-        self.recording = True
-        self.camera_data_collector = DataCollector(oss_service, str(uuid.uuid4()), "camera")
-
-        def generate():
-            consecutive_errors = 0
-            max_consecutive_errors = 50
-            esp32_first_frame = True
-            frame_count = 0
-            last_fps_time = time.time()
-            fps_frame_count = 0
-            processing_fps = 0.0
-            video_fps = 0.0
-            try:
-                while self.recording and not self.camera_session.get("stop_flag"):
-                    if is_esp32:
-                        frame = self._receive_esp32_frame(wait_for_data=esp32_first_frame)
-                        if esp32_first_frame:
-                            esp32_first_frame = False
-                        if frame is None:
-                            consecutive_errors += 1
-                            if consecutive_errors > max_consecutive_errors:
-                                break
-                            continue
-                        consecutive_errors = 0
-                    else:
-                        ret, frame = self.cap.read()
-                        if not ret:
-                            break
-
-                    frame_count += 1
-                    fps_frame_count += 1
-                    now = time.time()
-                    elapsed = now - last_fps_time
-                    if elapsed >= 1.0:
-                        processing_fps = fps_frame_count / elapsed
-                        if is_esp32:
-                            video_fps = processing_fps
-                        fps_frame_count = 0
-                        last_fps_time = now
-
-                    try:
-                        results = self.tracker.track_frame(frame)
-                        processed_frame = self.tracker.draw_detections(frame, results, show_stats=False)
-
-                        if self.is_recording_video:
-                            self.recorded_frames.append(processed_frame.copy())
-                            self.recorded_original_frames.append(frame.copy())
-                            if len(self.recorded_frames) > 3000:
-                                self.recorded_frames.pop(0)
-                                self.recorded_original_frames.pop(0)
-
-                        detections = results.get("detections", [])
-                        if self.camera_data_collector:
-                            for det in detections:
-                                track_id = det.get("track_id")
-                                if track_id is not None:
-                                    self.camera_data_collector.collect_detection(
-                                        frame,
-                                        track_id,
-                                        det.get("class_name", "unknown"),
-                                        det.get("bbox", [0, 0, 0, 0]),
-                                        det.get("confidence", 0),
-                                    )
-
-                        stats = results.get("stats", {})
-                        current_frame = stats.get("current_frame", {})
-                        bayesian_stats = stats.get("bayesian_stats", {})
-                        socket_manager.emit_nowait(
-                            "camera_track_stats",
-                            {
-                                "total_counts": stats.get("total_counts", {}),
-                                "current_frame": current_frame,
-                                "total_tracks": stats.get("total_tracks", 0),
-                                "class_count": sum(1 for count in current_frame.values() if count > 0),
-                                "interval": results.get("interval", 1),
-                                "video_fps": round(video_fps, 1) if is_esp32 else configured_fps,
-                                "processing_fps": round(processing_fps, 1),
-                                "frame_count": frame_count,
-                                "bayesian_stats": {
-                                    "rematch_count": bayesian_stats.get("rematch_count", 0),
-                                    "stable_library_size": bayesian_stats.get("stable_library_size", 0),
-                                    "sigma_sq": bayesian_stats.get("sigma_sq", 0),
-                                    "rematched_ids": bayesian_stats.get("rematched_ids", []),
-                                },
-                            },
-                        )
-
-                        ok, jpeg = cv2.imencode(".jpg", processed_frame)
-                        if ok:
-                            yield (
-                                b"--frame\r\n"
-                                b"Content-Type: image/jpeg\r\n\r\n"
-                                + jpeg.tobytes()
-                                + b"\r\n"
-                            )
-                    except Exception:
-                        consecutive_errors += 1
-                        if consecutive_errors > max_consecutive_errors:
-                            break
-                        continue
-            finally:
-                if self.cap:
-                    self.cap.release()
-                    self.cap = None
-                if is_esp32 and self.esp32_socket:
-                    self.esp32_socket.close()
-                    self.esp32_socket = None
-                with self.camera_lock:
-                    if self.camera_session:
-                        self.camera_session["is_processing"] = False
-
-        return StreamingResponse(generate(), media_type="multipart/x-mixed-replace; boundary=frame")
-
-    def start_camera_session(self, model_key: str, username: str) -> str:
-        import uuid
-        session_id = uuid.uuid4().hex[:8]
-
-        with self.camera_lock:
-            if self.camera_session and self.camera_session.get("is_processing"):
-                self.stop_camera()
-
-            kind, model_name = self._resolve_kind(model_key)
-            model_config = self.runtime.config.get_model_config(kind)
-            conf_threshold = model_config.get("conf_threshold", 0.35)
-
-            self.camera_session = {
-                "is_processing": True,
-                "stop_flag": False,
-                "session_id": session_id
-            }
-            self.camera_meta = {
-                "username": username,
-                "modelKey": model_key,
-                "kind": kind,
-                "conf": conf_threshold
-            }
-
-            input_size = self.runtime.config.get_input_size(kind)
-            tracker_type = self.runtime.tracker_config.DEFAULT_TRACKER
-            configured_fps = int(self.runtime.tracker_config.get_tracker_config(tracker_type).get("frame_rate", 30))
-
-            self.tracker = self.runtime.TrackerPredictor(
-                kind=kind,
-                conf=conf_threshold,
-                tracker_type=tracker_type,
-                reset_id=True,
-            )
-
-            self.cap = cv2.VideoCapture(0)
-            self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, input_size[1])
-            self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, input_size[0])
-            self.cap.set(cv2.CAP_PROP_FPS, configured_fps)
-
-            self.recording = True
-            self.camera_data_collector = DataCollector(oss_service, session_id, "camera")
-
-        return session_id
-
-    def get_camera_stream(self):
-        from fastapi.responses import StreamingResponse
-
-        with self.camera_lock:
-            if not self.camera_session or not self.camera_session.get("is_processing"):
-                return JSONResponse({"error": "Camera not started"}, status_code=404)
-
-        def generate():
-            while True:
-                with self.camera_lock:
-                    if not self.cap or not self.cap.isOpened():
-                        break
-                    if self.camera_session and self.camera_session.get("stop_flag"):
-                        break
-
-                ret, frame = self.cap.read()
-                if not ret:
-                    break
-
-                original_frame = frame.copy()
-                results = self.tracker.track_frame(frame)
-                processed_frame = self.tracker.draw_detections(original_frame, results, show_stats=True)
-
-                detections = results.get("detections", [])
-                if self.camera_data_collector:
-                    for det in detections:
-                        track_id = det.get("track_id")
-                        if track_id is not None:
-                            self.camera_data_collector.collect_detection(
-                                original_frame,
-                                track_id,
-                                det.get("class_name", "unknown"),
-                                det.get("bbox", [0, 0, 0, 0]),
-                                det.get("confidence", 0),
-                            )
-
-                stats = results.get("stats", {})
-                socket_manager.emit_nowait("camera_stats", {
-                    "sessionId": self.camera_session.get("session_id", ""),
-                    "total_tracks": stats.get("total_tracks", 0),
-                    "current_frame": stats.get("current_frame", {})
-                })
-
-                ok, jpeg = cv2.imencode(".jpg", processed_frame)
-                if ok:
-                    yield (b"--frame\r\n"
-                           b"Content-Type: image/jpeg\r\n\r\n"
-                           + jpeg.tobytes()
-                           + b"\r\n")
-
-        return StreamingResponse(generate(), media_type="multipart/x-mixed-replace; boundary=frame")
-
-    def stop_camera(self) -> JSONDict:
-        self.recording = False
-        with self.camera_lock:
-            if self.camera_session:
-                self.camera_session["stop_flag"] = True
-
-        if self.camera_meta.get("streamSource") == "esp32":
-            esp32_ip = self.camera_meta.get("esp32Ip", "")
-            if esp32_ip:
-                self._send_esp32_command(esp32_ip, 81, "stop")
-
-        if self.esp32_socket:
-            self.esp32_socket.close()
-            self.esp32_socket = None
-
-        if self.camera_data_collector:
-            summary = self.camera_data_collector.save_summary(self.camera_meta.get("username", ""))
-            if summary:
-                create_data_collection_record(summary)
-            self.camera_data_collector = None
-
-        return {"status": 200, "message": "Prediction completed", "code": 0}
-
-    def start_recording(self) -> JSONDict:
-        self.is_recording_video = True
-        self.recorded_frames = []
-        self.recorded_original_frames = []
-        return {"status": 200, "message": "Recording started", "code": 0}
-
-    def stop_recording(self, *, username: str, model_key: str, start_time: str) -> JSONDict:
-        self.is_recording_video = False
-        if not self.tracker:
-            return {"status": 200, "message": "Recording stopped (no tracking data)", "code": 0}
-
-        out_video_url = None
-        input_video_url = None
-        temp_dir = Path(tempfile.mkdtemp(prefix="camera_recording_"))
-        try:
-            final_stats = self.tracker.get_stats()
-            if self.recorded_frames:
-                timestamp = time.strftime("%Y%m%d_%H%M%S")
-                height, width = self.recorded_frames[0].shape[:2]
-                fourcc = cv2.VideoWriter_fourcc(*"XVID")
-                fps = 20.0
-
-                processed_path = temp_dir / f"camera_processed_{timestamp}.avi"
-                original_path = temp_dir / f"camera_original_{timestamp}.avi"
-
-                processed_writer = cv2.VideoWriter(str(processed_path), fourcc, fps, (width, height))
-                for frame in self.recorded_frames:
-                    processed_writer.write(frame)
-                processed_writer.release()
-
-                original_writer = cv2.VideoWriter(str(original_path), fourcc, fps, (width, height))
-                for frame in self.recorded_original_frames:
-                    original_writer.write(frame)
-                original_writer.release()
-
-                processed_final = self._convert_file_to_mp4_if_possible(processed_path)
-                original_final = self._convert_file_to_mp4_if_possible(original_path)
-                out_video_url = oss_service.upload_file(processed_final, "camera_predict")
-                input_video_url = oss_service.upload_file(original_final, "camera_predict")
-
-                self.recorded_frames = []
-                self.recorded_original_frames = []
-
-            create_camera_record(
-                {
-                    "modelKey": model_key,
-                    "username": username,
-                    "startTime": start_time,
-                    "inputVideo": input_video_url,
-                    "outVideo": out_video_url,
-                    "trackStats": json.dumps(final_stats, ensure_ascii=False),
-                }
-            )
-            return {"status": 200, "message": "Recording saved successfully", "code": 0, "videoUrl": out_video_url}
-        except Exception as exc:
-            logger.exception("stop_recording failed")
-            return {"status": 500, "message": f"Save failed: {exc}", "code": -1}
-        finally:
-            cleanup_temp_dir(str(temp_dir))
-
     def convert_avi_to_mp4(self, temp_output: Path, output_path: Path):
         command = [
             settings.ffmpeg_binary,
@@ -1455,81 +1109,5 @@ class PredictionService:
         except Exception:
             pass
         return source_path
-
-    def _get_local_ip(self) -> str:
-        try:
-            probe = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-            probe.connect(("8.8.8.8", 80))
-            ip = probe.getsockname()[0]
-            probe.close()
-            return ip
-        except Exception:
-            try:
-                return socket.gethostbyname(socket.gethostname())
-            except Exception:
-                return "127.0.0.1"
-
-    def _send_esp32_command(self, esp32_ip: str, esp32_port: int, command: str, video_port: int | None = None) -> None:
-        try:
-            cmd_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-            cmd_socket.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
-            cmd_socket.bind((self._get_local_ip(), 0))
-            payload = f"start:{video_port}" if command == "start" and video_port else command
-            cmd_socket.sendto(payload.encode(), (esp32_ip, esp32_port))
-            cmd_socket.close()
-        except Exception:
-            logger.exception("Failed to send ESP32 command")
-
-    def _receive_esp32_frame(self, wait_for_data: bool = True):
-        try:
-            self.esp32_socket.settimeout(10.0 if wait_for_data else 1.0)
-            frame_buffer = b""
-            expected_length = 0
-            receiving_frame = False
-            packet_count = 0
-            while self.recording:
-                try:
-                    data, _addr = self.esp32_socket.recvfrom(65535)
-                    if len(data) >= 6 and data[0] == 0xAA and data[1] == 0xBB and data[2] == 0xCC:
-                        expected_length = (data[3] << 8) | data[4]
-                        frame_buffer = b""
-                        receiving_frame = True
-                        packet_count = 0
-                        continue
-
-                    if len(data) == 2 and data[0] == 0xDD and data[1] == 0xEE:
-                        if receiving_frame and frame_buffer:
-                            if expected_length > 0 and abs(len(frame_buffer) - expected_length) > 2000:
-                                frame_buffer = b""
-                                receiving_frame = False
-                                continue
-                            if len(frame_buffer) >= 2 and frame_buffer[0] == 0xFF and frame_buffer[1] == 0xD8:
-                                image = cv2.imdecode(np.frombuffer(frame_buffer, dtype=np.uint8), cv2.IMREAD_COLOR)
-                                if image is not None:
-                                    return image
-                        frame_buffer = b""
-                        expected_length = 0
-                        receiving_frame = False
-                        packet_count = 0
-                        continue
-
-                    if receiving_frame and len(data) > 2:
-                        frame_buffer += data[2:]
-                        packet_count += 1
-                        if packet_count > 1500 or len(frame_buffer) > 400000:
-                            frame_buffer = b""
-                            receiving_frame = False
-                            packet_count = 0
-                except socket.timeout:
-                    if wait_for_data:
-                        return None
-                    continue
-                except Exception:
-                    continue
-            return None
-        except Exception:
-            logger.exception("Failed to receive ESP32 frame")
-            return None
-
 
 prediction_service = PredictionService()

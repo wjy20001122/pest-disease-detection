@@ -6,10 +6,8 @@ from typing import Iterator
 from sqlalchemy.orm import Session
 
 from app.db.models import (
-    CAMERA_RECORD_FIELDS,
     IMG_RECORD_FIELDS,
     VIDEO_RECORD_FIELDS,
-    CameraRecord,
     DataCollectionRecord,
     ImgRecord,
     VideoRecord,
@@ -56,16 +54,6 @@ def create_video_record(payload: JSONDict) -> JSONDict:
         return model_to_dict(record)
 
 
-def create_camera_record(payload: JSONDict) -> JSONDict:
-    with session_scope() as db:
-        record = CameraRecord()
-        apply_generic_payload(record, payload, CAMERA_RECORD_FIELDS)
-        db.add(record)
-        db.flush()
-        db.refresh(record)
-        return model_to_dict(record)
-
-
 def create_data_collection_record(payload: JSONDict) -> JSONDict:
     with session_scope() as db:
         record = DataCollectionRecord()
@@ -74,4 +62,3 @@ def create_data_collection_record(payload: JSONDict) -> JSONDict:
         db.flush()
         db.refresh(record)
         return model_to_dict(record)
-

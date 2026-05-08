@@ -44,12 +44,6 @@ const routes = [
         meta: { title: '检测详情' }
       },
       {
-        path: 'tracking',
-        name: 'Tracking',
-        component: () => import('@/views/Tracking.vue'),
-        meta: { requiresAdmin: true, title: '虫害跟踪', group: 'workspace', icon: 'Location' }
-      },
-      {
         path: 'knowledge',
         name: 'Knowledge',
         component: () => import('@/views/Knowledge.vue'),

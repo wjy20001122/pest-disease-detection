@@ -7,7 +7,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.routers import files, prediction, records, system, users
-from app.api.routers import auth, detection, tracking, knowledge, qna, notifications, admin, environment
+from app.api.routers import auth, detection, knowledge, qna, notifications, admin, environment
 from app.api.api_keys import router as api_keys_router
 from app.core.config import settings
 from app.db.bootstrap import bootstrap_runtime_data
@@ -37,8 +37,6 @@ def create_fastapi_app() -> FastAPI:
 
     app.include_router(auth.router)
     app.include_router(detection.router)
-    app.include_router(tracking.router)
-    app.include_router(tracking.router, prefix="/api/v1")
     app.include_router(knowledge.router)
     app.include_router(qna.router)
     app.include_router(notifications.router)

@@ -1,39 +1,26 @@
 <template>
   <div class="detect-page">
-    <div class="detect-tabs" v-if="isAdmin">
+    <div class="detect-tabs">
       <button :class="{ active: tab === 'image' }" @click="switchTab('image')">图像检测</button>
       <button :class="{ active: tab === 'video' }" @click="switchTab('video')">视频检测</button>
-      <button :class="{ active: tab === 'camera' }" @click="switchTab('camera')">摄像头检测</button>
     </div>
-
-    <el-alert
-      v-else
-      title="当前账号仅开放图像检测，视频与摄像头检测仅管理员可用。"
-      type="info"
-      :closable="false"
-      show-icon
-      style="margin-bottom: 12px"
-    />
 
     <div class="detect-content" v-if="tab === 'image' && !imageResult">
       <div class="upload-section">
-        <div class="upload-area" @click="triggerUpload" @dragover.prevent @drop.prevent="handleDrop">
+        <div v-if="!file" class="upload-area" @click="triggerUpload" @dragover.prevent @drop.prevent="handleDrop">
           <input ref="fileInput" type="file" accept="image/jpeg,image/png,image/webp" @change="handleFileChange" hidden />
           <div class="upload-icon">🖼️</div>
           <div class="upload-text">
-            <template v-if="!file">
-              <p>点击或拖拽上传图片</p>
-              <p class="hint">支持 JPG、PNG、WebP</p>
-            </template>
-            <template v-else>
-              <p>{{ file.name }}</p>
-              <p class="hint">点击更换文件</p>
-            </template>
+            <p>点击或拖拽上传图片</p>
+            <p class="hint">支持 JPG、PNG、WebP</p>
           </div>
         </div>
 
         <div v-if="imagePreviewUrl" class="preview-card">
-          <p class="preview-title">当前图片预览（未检测）</p>
+          <div class="preview-head">
+            <p class="preview-title">当前图片预览（未检测）</p>
+            <button class="btn-outline" @click="triggerUpload">更换图像</button>
+          </div>
           <img :src="imagePreviewUrl" alt="当前上传图片预览" class="preview-image" />
         </div>
 
@@ -98,25 +85,41 @@
       </div>
     </div>
 
-    <div class="detect-content" v-if="isAdmin && tab === 'video' && !videoResult && !videoProcessing">
+    <div class="detect-content" v-if="tab === 'video' && !videoResult && !videoProcessing">
       <div class="upload-section">
-        <div class="upload-area" @click="triggerVideoUpload" @dragover.prevent @drop.prevent="handleVideoDrop">
+        <div v-if="!videoFile" class="upload-area" @click="triggerVideoUpload" @dragover.prevent @drop.prevent="handleVideoDrop">
           <input ref="videoFileInput" type="file" accept="video/mp4,video/avi,video/quicktime" @change="handleVideoChange" hidden />
           <div class="upload-icon">🎥</div>
           <div class="upload-text">
-            <template v-if="!videoFile">
-              <p>点击或拖拽上传视频</p>
-              <p class="hint">支持 MP4、AVI、MOV</p>
-            </template>
-            <template v-else>
-              <p>{{ videoFile.name }}</p>
-              <p class="hint">点击更换文件</p>
-            </template>
+            <p>点击或拖拽上传视频</p>
+            <p class="hint">支持 MP4、AVI、MOV</p>
           </div>
         </div>
         <div v-if="videoPreviewUrl" class="preview-card">
-          <p class="preview-title">当前视频预览（未处理）</p>
+          <div class="preview-head">
+            <p class="preview-title">当前视频预览（未处理）</p>
+            <button class="btn-outline" @click="triggerVideoUpload">更换视频</button>
+          </div>
           <video :src="videoPreviewUrl" controls class="preview-video" />
+        </div>
+        <div class="model-section">
+          <p class="section-label">本地模型选择</p>
+          <div class="model-cards">
+            <div
+              v-for="model in models"
+              :key="`video-${model.modelKey}`"
+              :class="['model-card', { active: selectedVideoModel === model.modelKey }]"
+              @click="selectedVideoModel = model.modelKey"
+            >
+              <div class="model-name">{{ model.modelName }}</div>
+              <div class="model-classes">
+                <span v-for="(cls, idx) in (model.classes || []).slice(0, 4)" :key="idx" class="class-tag">
+                  {{ cls }}
+                </span>
+              </div>
+            </div>
+          </div>
+          <div class="selection-tip">视频检测仅使用本地模型，不走云端分析。</div>
         </div>
         <button class="detect-btn" @click="startVideoDetect" :disabled="!videoFile || loading">
           {{ loading ? '处理中...' : '开始处理视频' }}
@@ -124,56 +127,11 @@
       </div>
     </div>
 
-    <div class="detect-content" v-if="isAdmin && tab === 'camera'">
-      <div class="upload-section">
-        <div class="camera-preview">
-          <video v-if="cameraRunning" ref="cameraVideo" autoplay playsinline muted></video>
-          <div v-else class="video-placeholder">
-            <p>摄像头未启动</p>
-          </div>
-        </div>
-
-        <canvas ref="cameraCanvas" class="camera-canvas"></canvas>
-
-        <div v-if="cameraResult" class="camera-result card-lite">
-          <p><strong>检测来源：</strong>{{ cameraResult.source || '-' }}</p>
-          <p><strong>是否检测到病虫害：</strong>{{ cameraResult.has_pest ? '是' : '否' }}</p>
-          <p v-if="cameraResult.merged_result?.diseases?.length">
-            <strong>病虫害：</strong>
-            {{ cameraResult.merged_result.diseases.map(d => d.name).join('、') }}
-          </p>
-        </div>
-
-        <div class="camera-actions">
-          <button class="detect-btn" :disabled="loading || cameraRunning" @click="startCameraDetect">
-            {{ loading ? '启动中...' : '开始摄像头检测' }}
-          </button>
-          <button class="btn-outline" :disabled="loading || !cameraRunning" @click="stopCameraDetect">
-            停止摄像头检测
-          </button>
-        </div>
-      </div>
-    </div>
-
-    <div class="detect-content" v-if="isAdmin && videoProcessing">
+    <div class="detect-content" v-if="tab === 'video' && videoProcessing">
       <div class="video-processing">
-        <div v-if="videoPreviewUrl" class="processing-video-wrap with-overlay">
-          <video
-            ref="processingVideoEl"
-            :src="videoPreviewUrl"
-            class="processing-video"
-            autoplay
-            muted
-            controls
-            playsinline
-            @loadedmetadata="renderLiveDetections"
-            @timeupdate="renderLiveDetections"
-          />
-          <canvas ref="processingOverlayEl" class="processing-overlay"></canvas>
-        </div>
-        <div v-else class="processing-icon">🎥</div>
+        <div class="processing-icon">🎥</div>
         <h3>视频处理中</h3>
-        <p>{{ videoPreviewUrl ? '正在实时播放上传视频并分析病虫害，请稍候...' : '正在分析视频中的病虫害，请稍候...' }}</p>
+        <p>正在分析视频中的病虫害，请稍候...</p>
         <div class="progress-section">
           <el-progress :percentage="videoProgress" :stroke-width="12" />
           <p class="progress-text">{{ videoProgressText }}</p>
@@ -181,7 +139,6 @@
         <div class="processing-stats" v-if="videoStats">
           <span>已处理帧：{{ videoStats.frame_count || 0 }}</span>
           <span>跟踪目标：{{ videoStats.total_tracks || 0 }}</span>
-          <span>检测数量：{{ videoStats.total_counts ? Object.values(videoStats.total_counts).reduce((a, b) => a + b, 0) : 0 }}</span>
         </div>
         <button class="btn-outline" @click="cancelVideoProcessing">取消</button>
       </div>
@@ -261,11 +218,15 @@
       </div>
     </div>
 
-    <div class="result-section" v-if="isAdmin && tab === 'video' && videoResult">
+    <div class="result-section" v-if="tab === 'video' && videoResult">
       <div class="result-card">
         <div class="result-header">
-          <span class="source-tag video">🎥 视频检测结果</span>
+          <span class="source-tag local_model">视频检测结果</span>
           <button class="btn-ghost" @click="resetVideo">重新检测</button>
+        </div>
+        <div class="result-meta">
+          <span>模型：{{ videoResult.selected_model || selectedVideoModel }}</span>
+          <span>来源：本地模型</span>
         </div>
         <div class="video-result">
           <div class="video-player">
@@ -276,22 +237,16 @@
           </div>
           <div class="video-stats" v-if="videoResult.stats">
             <h3>检测统计</h3>
-            <div class="stats-grid">
+            <div class="stats-grid stats-grid-compact">
               <div class="stat-box">
-                <span class="stat-num">{{ videoResult.stats.total_counts ? Object.values(videoResult.stats.total_counts).reduce((a, b) => a + b, 0) : 0 }}</span>
-                <span class="stat-desc">总检测数</span>
+                <span class="stat-num">{{ totalDetectedPests }}</span>
+                <span class="stat-desc">病害/虫害总数</span>
               </div>
-              <div class="stat-box">
-                <span class="stat-num">{{ videoResult.stats.total_tracks || 0 }}</span>
-                <span class="stat-desc">跟踪目标数</span>
-              </div>
-              <div class="stat-box">
-                <span class="stat-num">{{ videoResult.stats.frame_count || 0 }}</span>
-                <span class="stat-desc">处理帧数</span>
-              </div>
-              <div class="stat-box">
-                <span class="stat-num">{{ videoResult.detections?.length || 0 }}</span>
-                <span class="stat-desc">检测类别</span>
+            </div>
+            <div v-if="videoResult.detections?.length" class="class-counts">
+              <div v-for="(item, index) in videoResult.detections" :key="`class-count-${index}`" class="class-count-item">
+                <span class="class-name">{{ item.class }}</span>
+                <span class="class-value">{{ item.trackCount }} 只</span>
               </div>
             </div>
           </div>
@@ -328,6 +283,7 @@ const tab = ref('image')
 const loading = ref(false)
 const models = ref([{ modelKey: 'pest', modelName: '默认模型', classes: [] }])
 const selectedModel = ref('pest')
+const selectedVideoModel = ref('pest')
 
 const file = ref(null)
 const fileInput = ref(null)
@@ -347,17 +303,10 @@ const videoProgressText = ref('')
 const videoStats = ref(null)
 const videoSessionId = ref(null)
 const videoPreviewUrl = ref('')
-const processingVideoEl = ref(null)
-const processingOverlayEl = ref(null)
 const videoLiveDetections = ref([])
-
-const cameraRunning = ref(false)
-const cameraVideo = ref(null)
-const cameraCanvas = ref(null)
-const cameraResult = ref(null)
-let cameraMediaStream = null
-let cameraWs = null
-let cameraFrameTimer = null
+const VIDEO_TASK_STORAGE_KEY = 'detect_video_active_task'
+let videoPollingActive = false
+let videoPollingSessionId = ''
 
 const canDetect = computed(() => {
   if (isAdmin.value) return Boolean(file.value && selectedModel.value)
@@ -382,8 +331,13 @@ const detectionItems = computed(() => {
   return Object.values(counts)
 })
 
+const totalDetectedPests = computed(() => {
+  const detections = videoResult.value?.detections || []
+  if (!detections.length) return 0
+  return detections.reduce((sum, item) => sum + (Number(item.trackCount) || 0), 0)
+})
+
 function switchTab(next) {
-  if (!isAdmin.value && next !== 'image') return
   tab.value = next
 }
 
@@ -483,65 +437,14 @@ async function fetchEnvironmentByIp(showToast = false) {
   }
 }
 
-function renderLiveDetections() {
-  const videoEl = processingVideoEl.value
-  const canvasEl = processingOverlayEl.value
-  if (!videoEl || !canvasEl) return
-
-  const videoWidth = videoEl.videoWidth || 0
-  const videoHeight = videoEl.videoHeight || 0
-  if (!videoWidth || !videoHeight) return
-
-  const displayWidth = videoEl.clientWidth || videoWidth
-  const displayHeight = videoEl.clientHeight || videoHeight
-  if (canvasEl.width !== displayWidth) canvasEl.width = displayWidth
-  if (canvasEl.height !== displayHeight) canvasEl.height = displayHeight
-
-  const ctx = canvasEl.getContext('2d')
-  if (!ctx) return
-  ctx.clearRect(0, 0, canvasEl.width, canvasEl.height)
-
-  const detections = Array.isArray(videoLiveDetections.value) ? videoLiveDetections.value : []
-  if (!detections.length) return
-
-  const latestFrame = Math.max(...detections.map(det => Number(det.frame) || 0))
-  const latestFrameDetections = detections.filter(det => (Number(det.frame) || 0) === latestFrame)
-
-  const scaleX = canvasEl.width / videoWidth
-  const scaleY = canvasEl.height / videoHeight
-  ctx.lineWidth = 2
-  ctx.font = '12px sans-serif'
-
-  latestFrameDetections.forEach((det) => {
-    const bbox = Array.isArray(det.bbox) ? det.bbox : []
-    if (bbox.length < 4) return
-    const [x1, y1, x2, y2] = bbox.map(v => Number(v) || 0)
-    const drawX = x1 * scaleX
-    const drawY = y1 * scaleY
-    const drawW = Math.max((x2 - x1) * scaleX, 2)
-    const drawH = Math.max((y2 - y1) * scaleY, 2)
-
-    ctx.strokeStyle = '#2563eb'
-    ctx.fillStyle = 'rgba(37, 99, 235, 0.16)'
-    ctx.fillRect(drawX, drawY, drawW, drawH)
-    ctx.strokeRect(drawX, drawY, drawW, drawH)
-
-    const labelText = `${det.class || '目标'} #${det.track_id ?? '-'}`
-    const textX = Math.max(drawX, 0)
-    const textY = Math.max(drawY - 6, 14)
-    ctx.fillStyle = '#1e3a8a'
-    ctx.fillRect(textX, textY - 12, Math.min(labelText.length * 7 + 8, canvasEl.width - textX), 14)
-    ctx.fillStyle = '#ffffff'
-    ctx.fillText(labelText, textX + 4, textY - 2)
-  })
-}
-
 function buildVideoDetectionSummary(statusPayload) {
   const summaryMap = {}
+  const uniqueTrackCounts = statusPayload?.unique_track_counts || {}
   const totalCounts = statusPayload?.total_counts || {}
   const tailDetections = Array.isArray(statusPayload?.detections) ? statusPayload.detections : []
 
-  Object.entries(totalCounts).forEach(([className, countValue]) => {
+  const countSource = Object.keys(uniqueTrackCounts).length ? uniqueTrackCounts : totalCounts
+  Object.entries(countSource).forEach(([className, countValue]) => {
     summaryMap[className] = {
       class: className,
       trackCount: Number(countValue) || 0,
@@ -564,6 +467,142 @@ function buildVideoDetectionSummary(statusPayload) {
 
 function getRequestErrorMessage(error, fallback = '操作失败，请稍后重试') {
   return error?.response?.data?.detail || error?.message || fallback
+}
+
+function saveActiveVideoTask() {
+  if (!videoSessionId.value) return
+  localStorage.setItem(
+    VIDEO_TASK_STORAGE_KEY,
+    JSON.stringify({
+      session_id: videoSessionId.value,
+      selected_model: selectedVideoModel.value,
+      updated_at: Date.now()
+    })
+  )
+}
+
+function clearActiveVideoTask() {
+  localStorage.removeItem(VIDEO_TASK_STORAGE_KEY)
+}
+
+async function pollVideoTask(sessionId, modelKey, notifyOnComplete = true) {
+  if (!sessionId) return
+  if (videoPollingActive && videoPollingSessionId === sessionId) return
+  videoPollingActive = true
+  videoPollingSessionId = sessionId
+
+  videoProcessing.value = true
+  videoSessionId.value = sessionId
+  videoProgressText.value = '任务排队中，等待 worker 处理...'
+  saveActiveVideoTask()
+
+  try {
+    let pollCount = 0
+    let stalledRounds = 0
+    let stallWarningShown = false
+    let lastFrameCount = -1
+    let terminalReached = false
+
+    while (videoPollingActive && videoPollingSessionId === sessionId) {
+      await new Promise(resolve => setTimeout(resolve, 1000))
+      const statusRes = await detectionApi.videoStatus(sessionId)
+      const status = statusRes.status
+
+      if (status === 'queued') {
+        videoProgressText.value = '任务排队中，等待 worker 处理...'
+      }
+      if (statusRes.progress !== undefined) videoProgress.value = Math.round(statusRes.progress)
+      if (statusRes.frame_count !== undefined && status !== 'queued') {
+        videoProgressText.value = `已处理 ${statusRes.frame_count} 帧`
+      }
+      videoStats.value = {
+        frame_count: statusRes.frame_count || 0,
+        total_counts: statusRes.total_counts || {},
+        total_tracks: statusRes.total_tracks || 0,
+        unique_track_counts: statusRes.unique_track_counts || {}
+      }
+      videoLiveDetections.value = Array.isArray(statusRes.detections) ? statusRes.detections : []
+      saveActiveVideoTask()
+
+      if (statusRes.frame_count === lastFrameCount && status === 'processing') {
+        stalledRounds += 1
+      } else {
+        stalledRounds = 0
+        lastFrameCount = statusRes.frame_count
+      }
+
+      if (!stallWarningShown && stalledRounds >= 8) {
+        stallWarningShown = true
+        ElMessage.warning('视频处理进度暂未变化，请稍候或检查 Celery worker 状态')
+      }
+
+      if (status === 'failed') {
+        terminalReached = true
+        clearActiveVideoTask()
+        throw new Error(statusRes.error_message || '视频处理失败')
+      }
+      if (status === 'stopped') {
+        terminalReached = true
+        clearActiveVideoTask()
+        ElMessage.info('视频处理已停止')
+        return
+      }
+      if (statusRes.is_processing === false || status === 'completed') {
+        terminalReached = true
+        break
+      }
+
+      pollCount += 1
+      if (pollCount >= 180) {
+        throw new Error('视频任务轮询超时，请稍后重试')
+      }
+    }
+
+    if (!videoPollingActive || videoPollingSessionId !== sessionId) {
+      return
+    }
+
+    if (!terminalReached) {
+      return
+    }
+
+    const finalStatus = await detectionApi.videoStatus(sessionId)
+    if (finalStatus.status === 'failed') {
+      clearActiveVideoTask()
+      throw new Error(finalStatus.error_message || '视频处理失败')
+    }
+    if (finalStatus.status === 'stopped') {
+      clearActiveVideoTask()
+      ElMessage.info('视频处理已停止')
+      return
+    }
+    if (finalStatus.is_processing === true && finalStatus.status !== 'completed') {
+      return
+    }
+
+    const streamUrl = detectionApi.videoStream(sessionId)
+    videoLiveDetections.value = Array.isArray(finalStatus.detections) ? finalStatus.detections : []
+    videoResult.value = {
+      video_url: streamUrl,
+      selected_model: finalStatus.selected_model || modelKey || selectedVideoModel.value,
+      stats: {
+        total_counts: finalStatus.total_counts || {},
+        total_tracks: finalStatus.total_tracks || 0,
+        frame_count: finalStatus.frame_count || 0,
+        unique_track_counts: finalStatus.unique_track_counts || {}
+      },
+      detections: buildVideoDetectionSummary(finalStatus)
+    }
+    clearActiveVideoTask()
+    if (notifyOnComplete) ElMessage.success('视频处理完成')
+  } finally {
+    if (videoPollingSessionId === sessionId) {
+      videoPollingActive = false
+      videoPollingSessionId = ''
+      videoProcessing.value = false
+      loading.value = false
+    }
+  }
 }
 
 function extractCountyFromAddress(addressText = '') {
@@ -603,7 +642,10 @@ async function startImageDetect() {
 }
 
 async function startVideoDetect() {
-  if (!isAdmin.value || !videoFile.value) return
+  if (!videoFile.value || !selectedVideoModel.value) {
+    ElMessage.warning('请先上传视频并选择本地模型')
+    return
+  }
   loading.value = true
   videoProcessing.value = true
   videoProgress.value = 0
@@ -612,82 +654,12 @@ async function startVideoDetect() {
   try {
     const formData = new FormData()
     formData.append('file', videoFile.value)
-    const uploadRes = await detectionApi.video(formData)
-    videoSessionId.value = uploadRes.session_id
-    let pollCount = 0
-    let stalledRounds = 0
-    let stallWarningShown = false
-    let lastFrameCount = -1
-
-    while (true) {
-      await new Promise(resolve => setTimeout(resolve, 1000))
-      const statusRes = await detectionApi.videoStatus(videoSessionId.value)
-
-      const status = statusRes.status
-      if (status === 'queued') {
-        videoProgressText.value = '任务排队中，等待 worker 处理...'
-      }
-      if (statusRes.progress !== undefined) videoProgress.value = Math.round(statusRes.progress)
-      if (statusRes.frame_count !== undefined && status !== 'queued') {
-        videoProgressText.value = `已处理 ${statusRes.frame_count} 帧`
-      }
-      videoStats.value = {
-        frame_count: statusRes.frame_count || 0,
-        total_counts: statusRes.total_counts || {},
-        total_tracks: statusRes.total_tracks || 0
-      }
-      videoLiveDetections.value = Array.isArray(statusRes.detections) ? statusRes.detections : []
-      requestAnimationFrame(renderLiveDetections)
-
-      if (statusRes.frame_count === lastFrameCount && status === 'processing') {
-        stalledRounds += 1
-      } else {
-        stalledRounds = 0
-        lastFrameCount = statusRes.frame_count
-      }
-
-      if (!stallWarningShown && stalledRounds >= 8) {
-        stallWarningShown = true
-        ElMessage.warning('视频处理进度暂未变化，请稍候或检查 Celery worker 状态')
-      }
-
-      if (status === 'failed' || status === 'stopped' || statusRes.is_processing === false) {
-        break
-      }
-
-      pollCount += 1
-      if (pollCount >= 180) {
-        throw new Error('视频任务轮询超时，请稍后重试')
-      }
-    }
-
-    const finalStatus = await detectionApi.videoStatus(videoSessionId.value)
-    if (finalStatus.status === 'failed') {
-      throw new Error(finalStatus.error_message || '视频处理失败')
-    }
-    if (finalStatus.status === 'stopped') {
-      ElMessage.info('视频处理已停止')
-      return
-    }
-
-    const streamUrl = detectionApi.videoStream(videoSessionId.value)
-    videoLiveDetections.value = Array.isArray(finalStatus.detections) ? finalStatus.detections : []
-    videoResult.value = {
-      video_url: streamUrl,
-      stats: {
-        total_counts: finalStatus.total_counts || {},
-        total_tracks: finalStatus.total_tracks || 0,
-        frame_count: finalStatus.frame_count || 0
-      },
-      detections: buildVideoDetectionSummary(finalStatus)
-    }
-    ElMessage.success('视频处理完成')
+    const uploadRes = await detectionApi.video(formData, { model_key: selectedVideoModel.value })
+    await pollVideoTask(uploadRes.session_id, selectedVideoModel.value, true)
   } catch (error) {
     ElMessage.error(getRequestErrorMessage(error, '视频处理失败，请重试'))
   } finally {
     loading.value = false
-    videoProcessing.value = false
-    requestAnimationFrame(renderLiveDetections)
   }
 }
 
@@ -698,84 +670,12 @@ async function cancelVideoProcessing() {
     } catch {}
   }
   videoProcessing.value = false
+  videoPollingActive = false
+  videoPollingSessionId = ''
   videoSessionId.value = null
   videoLiveDetections.value = []
   videoStats.value = null
-  requestAnimationFrame(renderLiveDetections)
-}
-
-async function startCameraDetect() {
-  if (!isAdmin.value) return
-  loading.value = true
-  try {
-    const token = localStorage.getItem('access_token')
-    if (!token) {
-      ElMessage.error('请先登录')
-      return
-    }
-    cameraMediaStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' }, audio: false })
-    if (cameraVideo.value) cameraVideo.value.srcObject = cameraMediaStream
-    const protocol = window.location.protocol === 'https:' ? 'wss' : 'ws'
-    const host = window.location.host
-    const wsUrl = `${protocol}://${host}/api/detection/camera/ws?token=${encodeURIComponent(token)}&model_key=pest&frame_interval_ms=700`
-    cameraWs = new WebSocket(wsUrl)
-    cameraWs.onmessage = (event) => {
-      try {
-        const msg = JSON.parse(event.data)
-        if (msg.type === 'detection_result') cameraResult.value = msg
-        else if (msg.type === 'error') ElMessage.error(msg.message || '摄像头检测异常')
-      } catch {}
-    }
-    cameraWs.onclose = () => stopCameraResources()
-    cameraFrameTimer = setInterval(() => {
-      if (!cameraWs || cameraWs.readyState !== WebSocket.OPEN) return
-      if (!cameraVideo.value || !cameraCanvas.value) return
-      if (cameraVideo.value.videoWidth === 0 || cameraVideo.value.videoHeight === 0) return
-      cameraCanvas.value.width = cameraVideo.value.videoWidth
-      cameraCanvas.value.height = cameraVideo.value.videoHeight
-      const ctx = cameraCanvas.value.getContext('2d')
-      ctx.drawImage(cameraVideo.value, 0, 0)
-      const imageData = cameraCanvas.value.toDataURL('image/jpeg', 0.75)
-      cameraWs.send(JSON.stringify({ type: 'frame', image: imageData }))
-    }, 700)
-    cameraRunning.value = true
-    ElMessage.success('摄像头检测已启动')
-  } catch {
-    ElMessage.error('启动摄像头检测失败')
-  } finally {
-    loading.value = false
-  }
-}
-
-async function stopCameraDetect() {
-  loading.value = true
-  try {
-    if (cameraWs && cameraWs.readyState === WebSocket.OPEN) {
-      cameraWs.send(JSON.stringify({ type: 'stop' }))
-      cameraWs.close()
-    }
-  } finally {
-    stopCameraResources()
-    loading.value = false
-  }
-}
-
-function stopCameraResources() {
-  if (cameraFrameTimer) {
-    clearInterval(cameraFrameTimer)
-    cameraFrameTimer = null
-  }
-  if (cameraWs) {
-    cameraWs.onmessage = null
-    cameraWs.onclose = null
-    cameraWs = null
-  }
-  if (cameraMediaStream) {
-    cameraMediaStream.getTracks().forEach(track => track.stop())
-    cameraMediaStream = null
-  }
-  if (cameraVideo.value) cameraVideo.value.srcObject = null
-  cameraRunning.value = false
+  clearActiveVideoTask()
 }
 
 function resetImage() {
@@ -789,28 +689,40 @@ function resetVideo() {
   videoFile.value = null
   videoSessionId.value = null
   videoLiveDetections.value = []
+  clearActiveVideoTask()
 }
 
-onUnmounted(async () => {
-  if (cameraRunning.value) await stopCameraDetect()
-})
-
 async function loadModelsForAdmin() {
-  if (!isAdmin.value) return
   try {
     const res = await mlApi.getModels()
     if (res?.data?.models?.length) {
       models.value = res.data.models
-      selectedModel.value = res.data.models[0].modelKey
+      if (!models.value.some((item) => item.modelKey === selectedModel.value)) {
+        selectedModel.value = res.data.models[0].modelKey
+      }
+      if (!models.value.some((item) => item.modelKey === selectedVideoModel.value)) {
+        selectedVideoModel.value = res.data.models[0].modelKey
+      }
     }
   } catch {
     models.value = [{ modelKey: 'pest', modelName: '默认模型', classes: [] }]
     selectedModel.value = 'pest'
+    selectedVideoModel.value = 'pest'
   }
 }
 
 onMounted(() => {
   loadModelsForAdmin()
+  const raw = localStorage.getItem(VIDEO_TASK_STORAGE_KEY)
+  if (!raw) return
+  try {
+    const saved = JSON.parse(raw)
+    const savedSessionId = saved?.session_id
+    if (!savedSessionId) return
+    if (saved?.selected_model) selectedVideoModel.value = saved.selected_model
+    tab.value = 'video'
+    pollVideoTask(savedSessionId, saved?.selected_model || selectedVideoModel.value, false).catch(() => {})
+  } catch {}
 })
 
 watch(isAdmin, (value) => {
@@ -836,21 +748,13 @@ watch(videoFile, (next, prev) => {
 })
 
 watch(videoProcessing, (processing) => {
-  if (!processing) return
-  requestAnimationFrame(() => {
-    if (processingVideoEl.value) {
-      processingVideoEl.value.currentTime = 0
-      processingVideoEl.value.play().catch(() => {})
-    }
-    renderLiveDetections()
-  })
-})
-
-watch(videoLiveDetections, () => {
-  requestAnimationFrame(renderLiveDetections)
+  if (!processing) {
+    return
+  }
 })
 
 onUnmounted(() => {
+  videoPollingActive = false
   if (imagePreviewUrl.value) URL.revokeObjectURL(imagePreviewUrl.value)
   if (videoPreviewUrl.value) URL.revokeObjectURL(videoPreviewUrl.value)
 })
@@ -867,7 +771,8 @@ onUnmounted(() => {
 .upload-icon { font-size: 48px; margin-bottom: 16px; }
 .upload-text { color: var(--text-secondary); p { margin: 8px 0; } .hint { font-size: 13px; color: var(--text-muted); } }
 .preview-card { border: 1px solid var(--border-light); border-radius: var(--radius-md); background: var(--bg-secondary); overflow: hidden; }
-.preview-title { margin: 0; padding: 10px 12px; font-size: 13px; color: var(--text-secondary); border-bottom: 1px solid var(--border-light); }
+.preview-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 12px; border-bottom: 1px solid var(--border-light); }
+.preview-title { margin: 0; font-size: 13px; color: var(--text-secondary); }
 .preview-image { display: block; width: 100%; max-height: 380px; object-fit: contain; background: #111827; }
 .preview-video { display: block; width: 100%; max-height: 420px; background: #000; }
 .model-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 12px; }
@@ -909,18 +814,14 @@ onUnmounted(() => {
 .disease-desc { font-size: 14px; color: var(--text-secondary); p { margin: 6px 0; } }
 .no-pest-message { text-align: center; padding: 48px 24px; .no-pest-icon { font-size: 64px; margin-bottom: 16px; } h3 { font-size: 20px; margin-bottom: 8px; } p { color: var(--text-secondary); margin-bottom: 8px; } }
 .video-processing { text-align: center; padding: 24px; .processing-icon { font-size: 64px; margin-bottom: 16px; } h3 { font-size: 20px; margin-bottom: 8px; } p { color: var(--text-secondary); margin-bottom: 24px; } }
-.processing-video-wrap { margin-bottom: 16px; border-radius: var(--radius-md); overflow: hidden; border: 1px solid var(--border-light); background: #000; }
-.processing-video-wrap.with-overlay { position: relative; }
-.processing-video { display: block; width: 100%; max-height: 420px; }
-.processing-overlay { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
 .progress-section { max-width: 400px; margin: 0 auto 24px; .progress-text { font-size: 13px; color: var(--text-muted); margin-top: 8px; } }
 .processing-stats { display: flex; justify-content: center; gap: 24px; margin-bottom: 24px; font-size: 14px; color: var(--text-secondary); }
 .video-player { background: #000; border-radius: var(--radius-lg); overflow: hidden; margin-bottom: 20px; video { width: 100%; display: block; max-height: 500px; } .video-placeholder { padding: 48px; text-align: center; color: var(--text-muted); } }
-.camera-preview { background: #000; border-radius: var(--radius-lg); overflow: hidden; video { width: 100%; display: block; max-height: 500px; object-fit: contain; } .video-placeholder { padding: 48px; text-align: center; color: var(--text-muted); background: var(--bg-secondary); } }
-.camera-canvas { display: none; }
-.camera-result { margin-top: 12px; padding: 12px; background: var(--bg-secondary); border-radius: var(--radius-md); p { margin: 4px 0; font-size: 13px; } }
-.camera-actions { margin-top: 16px; display: flex; gap: 12px; .detect-btn, .btn-outline { margin-top: 0; flex: 1; } }
-.video-stats { padding: 16px; background: var(--bg-secondary); border-radius: var(--radius-md); margin-bottom: 16px; h3 { font-size: 16px; margin-bottom: 12px; } .stats-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; } .stat-box { text-align: center; .stat-num { font-size: 28px; font-weight: 700; color: var(--primary); display: block; } .stat-desc { font-size: 13px; color: var(--text-muted); } } }
+.video-stats { padding: 16px; background: var(--bg-secondary); border-radius: var(--radius-md); margin-bottom: 16px; h3 { font-size: 16px; margin-bottom: 12px; } .stats-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; } .stats-grid-compact { grid-template-columns: 1fr; max-width: 280px; } .stat-box { text-align: center; .stat-num { font-size: 28px; font-weight: 700; color: var(--primary); display: block; } .stat-desc { font-size: 13px; color: var(--text-muted); } } }
+.class-counts { margin-top: 12px; display: grid; gap: 8px; }
+.class-count-item { display: flex; justify-content: space-between; align-items: center; background: var(--bg-primary); border: 1px solid var(--border-light); border-radius: var(--radius-sm); padding: 8px 12px; }
+.class-name { font-size: 14px; color: var(--text-primary); font-weight: 600; }
+.class-value { font-size: 14px; color: var(--primary); font-weight: 700; }
 @media (max-width: 768px) {
   .image-compare { grid-template-columns: 1fr; }
 }

@@ -1,16 +1,31 @@
 <template>
   <div class="history-page">
-    <PageHeader title="检测历史" subtitle="按类型、日期和关键词筛选历史检测记录" />
-
-    <div class="filters">
-      <el-select v-model="filter.type" placeholder="检测类型" clearable size="default" style="width: 120px">
-        <el-option label="图像" value="image" />
-        <el-option label="视频" value="video" />
-        <el-option label="摄像头" value="camera" />
-      </el-select>
-      <el-date-picker v-model="filter.date_from" type="date" value-format="YYYY-MM-DD" placeholder="开始日期" />
-      <el-date-picker v-model="filter.date_to" type="date" value-format="YYYY-MM-DD" placeholder="结束日期" />
-      <el-input v-model="filter.keyword" clearable placeholder="关键词(模型/crop)" style="width: 200px" />
+    <div class="filter-card card">
+      <div class="page-toolbar">
+        <div class="filters">
+          <el-select v-model="filter.type" placeholder="检测类型" clearable size="default" style="width: 120px">
+            <el-option label="图像" value="image" />
+            <el-option label="视频" value="video" />
+          </el-select>
+          <el-date-picker v-model="filter.date_from" type="date" value-format="YYYY-MM-DD" placeholder="开始日期" />
+          <el-date-picker v-model="filter.date_to" type="date" value-format="YYYY-MM-DD" placeholder="结束日期" />
+          <el-input v-model="filter.keyword" clearable placeholder="关键词(模型/crop)" style="width: 200px" />
+        </div>
+        <div class="toolbar-actions">
+          <el-dropdown trigger="click" @command="handleDeleteCommand">
+            <el-button type="danger" plain>
+              删除
+              <el-icon class="el-icon--right"><ArrowDown /></el-icon>
+            </el-button>
+            <template #dropdown>
+              <el-dropdown-menu>
+                <el-dropdown-item command="current">删除当前筛选结果</el-dropdown-item>
+                <el-dropdown-item command="all">删除全部历史</el-dropdown-item>
+              </el-dropdown-menu>
+            </template>
+          </el-dropdown>
+        </div>
+      </div>
     </div>
     
     <div class="history-list" v-if="list.length">
@@ -47,10 +62,10 @@
 <script setup>
 import { ref, reactive, onMounted, watch } from 'vue'
 import { useRouter } from 'vue-router'
+import { ElMessageBox, ElMessage } from 'element-plus'
 import { detectionApi } from '@/api'
-import PageHeader from '@/components/ui/PageHeader.vue'
 import EmptyState from '@/components/ui/EmptyState.vue'
-import { Document } from '@element-plus/icons-vue'
+import { ArrowDown, Document } from '@element-plus/icons-vue'
 
 const router = useRouter()
 const list = ref([])
@@ -58,7 +73,7 @@ const total = ref(0)
 const page = ref(1)
 const pageSize = 10
 const filter = reactive({ type: '', date_from: '', date_to: '', keyword: '' })
-const typeMap = { image: '图像', video: '视频', camera: '摄像头' }
+const typeMap = { image: '图像', video: '视频' }
 const severityMap = { high: '严重', medium: '中等', low: '轻微' }
 
 function parseJsonField(value, fallback) {
@@ -72,6 +87,8 @@ function parseJsonField(value, fallback) {
 }
 
 function resolveSource(item) {
+  const detectionType = item?.detection_type || item?.type
+  if (detectionType === 'video') return 'local_model'
   const source = item?.source || item?.model_key || item?.modelKey || ''
   return source === 'local_model' ? 'local_model' : 'cloud_ai'
 }
@@ -87,6 +104,10 @@ function resolveDetectionCount(item) {
     return Array.isArray(labels) ? labels.length : 0
   }
   const stats = parseJsonField(item?.track_stats, {})
+  const uniqueTrackCounts = stats?.unique_track_counts || stats?.uniqueTrackCounts || {}
+  if (uniqueTrackCounts && typeof uniqueTrackCounts === 'object') {
+    return Object.values(uniqueTrackCounts).reduce((sum, count) => sum + (Number(count) || 0), 0)
+  }
   const totalCounts = stats?.total_counts || stats?.totalCounts || {}
   if (!totalCounts || typeof totalCounts !== 'object') return 0
   return Object.values(totalCounts).reduce((sum, count) => sum + (Number(count) || 0), 0)
@@ -105,14 +126,19 @@ function resolveDiseaseName(item) {
   }
 
   const stats = parseJsonField(item?.track_stats, {})
+  const uniqueTrackCounts = stats?.unique_track_counts || stats?.uniqueTrackCounts || {}
   const totalCounts = stats?.total_counts || stats?.totalCounts || {}
-  const entries = Object.entries(totalCounts || {}).filter(([, count]) => Number(count) > 0)
+  const primaryCounts = Object.keys(uniqueTrackCounts || {}).length ? uniqueTrackCounts : totalCounts
+  const entries = Object.entries(primaryCounts || {}).filter(([, count]) => Number(count) > 0)
   if (!entries.length) return '未检测到病虫害'
 
   entries.sort((a, b) => Number(b[1]) - Number(a[1]))
   const [topName, topCount] = entries[0]
   const total = entries.reduce((sum, [, count]) => sum + (Number(count) || 0), 0)
-  return `${topName}（${topCount}次，合计${total}次）`
+  if (Object.keys(uniqueTrackCounts || {}).length) {
+    return `${topName}（${topCount}只，合计${total}只）`
+  }
+  return `${topName}（命中${topCount}次，合计${total}次）`
 }
 
 function resolveConfidence(item) {
@@ -163,13 +189,59 @@ function viewDetail(id, detectionType) {
   })
 }
 
+async function removeItem(item) {
+  const detectionType = item?.detection_type || item?.type
+  try {
+    await ElMessageBox.confirm('确定要删除这条历史记录吗？', '提示', { type: 'warning' })
+    await detectionApi.deleteHistoryRecord(item.id, detectionType)
+    ElMessage.success('已删除')
+    await fetchData()
+  } catch (err) {
+    if (err !== 'cancel' && err !== 'close') {
+      console.error(err)
+    }
+  }
+}
+
+async function handleDeleteCommand(command) {
+  try {
+    if (command === 'all') {
+      await ElMessageBox.confirm('确定要删除所有历史记录吗？此操作不可恢复。', '提示', { type: 'warning' })
+      await detectionApi.clearHistory()
+      ElMessage.success('已删除全部历史记录')
+      await fetchData()
+      return
+    }
+
+    await ElMessageBox.confirm('确定要删除当前筛选结果吗？此操作不可恢复。', '提示', { type: 'warning' })
+    const params = {
+      type: filter.type || undefined,
+      date_from: filter.date_from || undefined,
+      date_to: filter.date_to || undefined,
+      keyword: filter.keyword || undefined
+    }
+    const res = await detectionApi.history({ page: 1, page_size: 100, ...params })
+    const items = res.items || []
+    await Promise.all(items.map((item) => detectionApi.deleteHistoryRecord(item.id, item.detection_type || item.type)))
+    ElMessage.success('已删除当前筛选结果')
+    await fetchData()
+  } catch (err) {
+    if (err !== 'cancel' && err !== 'close') {
+      console.error(err)
+    }
+  }
+}
+
 watch(filter, () => { page.value = 1; fetchData() }, { deep: true })
 onMounted(fetchData)
 </script>
 
 <style lang="scss" scoped>
 .history-page { max-width: 1200px; margin: 0 auto; }
-.filters { display: flex; gap: 12px; margin-bottom: 24px; }
+.filter-card { padding: 16px; margin-bottom: 24px; }
+.page-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+.filters { display: flex; gap: 12px; flex-wrap: wrap; }
+.toolbar-actions { display: flex; align-items: center; }
 .history-list { display: flex; flex-direction: column; gap: 16px; }
 .history-item { padding: 20px; }
 .item-header { display: flex; gap: 8px; margin-bottom: 12px; }

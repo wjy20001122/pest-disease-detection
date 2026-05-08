@@ -12,7 +12,6 @@ from sqlalchemy.orm import Session
 from app.api.deps import get_admin_user
 from app.api.routers.notifications import _notification_to_dict, create_notification
 from app.db.models import (
-    CameraRecord,
     ImgRecord,
     KnowledgeItem,
     ModelPolicy,
@@ -160,13 +159,11 @@ async def get_dashboard(
 
     image_count = db.scalar(select(func.count()).select_from(ImgRecord)) or 0
     video_count = db.scalar(select(func.count()).select_from(VideoRecord)) or 0
-    camera_count = db.scalar(select(func.count()).select_from(CameraRecord)) or 0
-    total_detections = image_count + video_count + camera_count
+    total_detections = image_count + video_count
 
     detections_today = (
         (db.scalar(select(func.count()).select_from(ImgRecord).where(ImgRecord.startTime.like(f"{today_prefix}%"))) or 0)
         + (db.scalar(select(func.count()).select_from(VideoRecord).where(VideoRecord.startTime.like(f"{today_prefix}%"))) or 0)
-        + (db.scalar(select(func.count()).select_from(CameraRecord).where(CameraRecord.startTime.like(f"{today_prefix}%"))) or 0)
     )
 
     active_alerts = db.scalar(
@@ -190,7 +187,6 @@ async def get_dashboard(
         "detection_breakdown": {
             "image": image_count,
             "video": video_count,
-            "camera": camera_count,
         },
     }
 
@@ -208,8 +204,6 @@ async def get_admin_stats(
 
     img_records = db.execute(select(ImgRecord)).scalars().all()
     video_records = db.execute(select(VideoRecord)).scalars().all()
-    camera_records = db.execute(select(CameraRecord)).scalars().all()
-
     pest_distribution: dict[str, int] = {}
     crop_distribution: dict[str, int] = {}
     daily_stats: dict[str, int] = {}
@@ -238,7 +232,7 @@ async def get_admin_stats(
             except (TypeError, ValueError):
                 continue
 
-    for record in [*video_records, *camera_records]:
+    for record in video_records:
         if not _record_in_window(record.startTime, start, end):
             continue
         date_key = record.startTime[:10] if record.startTime else "unknown"
@@ -297,7 +291,6 @@ async def list_users(
         detection_count = (
             (db.scalar(select(func.count()).select_from(ImgRecord).where(ImgRecord.username == user.username)) or 0)
             + (db.scalar(select(func.count()).select_from(VideoRecord).where(VideoRecord.username == user.username)) or 0)
-            + (db.scalar(select(func.count()).select_from(CameraRecord).where(CameraRecord.username == user.username)) or 0)
         )
         items.append(
             {

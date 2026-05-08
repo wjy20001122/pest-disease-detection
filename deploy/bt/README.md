@@ -1,6 +1,6 @@
 # 宝塔面板部署指南（当前仓库）
 
-更新时间：2026-05-03
+更新时间：2026-05-08
 
 ## 1) 目标环境
 
@@ -16,6 +16,7 @@
 - 后端端口：`8000`
 - 前端生产构建目录：`/www/pest-disease-detection/frontend/dist`
 - 前端请求约定：`/api/*`，Nginx 需重写到后端 `/*`
+- `ESP/` 是独立小主机本地实时检测项目，不属于宝塔主站部署链路；部署见 `ESP/DEPLOY.md`
 
 ## 3) 数据库与账号（请使用你的生产配置）
 
@@ -83,9 +84,17 @@ curl -I http://127.0.0.1
 
 - 登录/注册
 - 检测页上传（原图+结果图）
-- 跟踪页状态流转
 - 通知已读与全部已读
 - 管理后台（用户/通知/模型）
+
+ESP32-CAM 本地实时检测验收不走宝塔主站：
+
+```bash
+cd /www/pest-disease-detection/ESP
+conda activate pest_detect
+python3 -m uvicorn server.main:app --host 0.0.0.0 --port 8010
+curl http://127.0.0.1:8010/health
+```
 
 ## 8) 发布前检查（阻断）
 

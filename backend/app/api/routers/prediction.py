@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, File, Query, UploadFile
+from fastapi.responses import JSONResponse
 
 from app.services.prediction_service import prediction_service
 from app.utils.common import JSONDict
@@ -59,40 +60,17 @@ def stop_video(sessionId: str | None = Query(None)) -> JSONDict:
     return prediction_service.stop_video(sessionId or "")
 
 
-@router.get("/predictCamera")
-@router.get("/api/flask/predictCamera")
-def predict_camera(
-    modelKey: str = Query(""),
-    username: str = Query(""),
-    startTime: str = Query(""),
-    conf: str = Query("0.5"),
-    fps: str | None = Query(None),
-    streamSource: str = Query("local"),
-    esp32Ip: str = Query(""),
-    esp32Port: int = Query(81),
-):
-    return prediction_service.predict_camera(
-        model_key=modelKey,
-        username=username,
-        start_time=startTime,
-        conf=conf,
-        fps=fps,
-        stream_source=streamSource,
-        esp32_ip=esp32Ip,
-        esp32_port=esp32Port,
-    )
-
-
-@router.get("/stopCamera")
-@router.get("/api/flask/stopCamera")
-def stop_camera() -> JSONDict:
-    return prediction_service.stop_camera()
-
-
 @router.get("/startRecording")
 @router.get("/api/flask/startRecording")
 def start_recording() -> JSONDict:
-    return prediction_service.start_recording()
+    return JSONResponse(
+        status_code=410,
+        content={
+            "status": 410,
+            "message": "Camera recording moved to the standalone ESP local service under ESP/.",
+            "code": 410,
+        },
+    )
 
 
 @router.get("/stopRecording")
@@ -102,10 +80,14 @@ def stop_recording(
     modelKey: str = Query(""),
     startTime: str = Query(""),
 ) -> JSONDict:
-    return prediction_service.stop_recording(
-        username=username,
-        model_key=modelKey,
-        start_time=startTime,
+    del username, modelKey, startTime
+    return JSONResponse(
+        status_code=410,
+        content={
+            "status": 410,
+            "message": "Camera recording moved to the standalone ESP local service under ESP/.",
+            "code": 410,
+        },
     )
 
 
@@ -119,4 +101,3 @@ async def upload_file(file: UploadFile = File(...), category: str = "img_predict
 @router.get("/api/flask/uploads/{category:path}/{filename:path}")
 def serve_upload(category: str, filename: str):
     return prediction_service.serve_upload(category, filename)
-

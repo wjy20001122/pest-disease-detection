@@ -63,7 +63,7 @@ class ExportService:
         detection_type: Optional[str] = None
     ) -> Dict[str, Any]:
         """导出用户的检测记录"""
-        from app.db.models import ImgRecord, VideoRecord, CameraRecord
+        from app.db.models import ImgRecord, VideoRecord
 
         records = []
 
@@ -100,25 +100,6 @@ class ExportService:
                 records.append({
                     "id": item.id,
                     "type": "video",
-                    "model_key": item.modelKey,
-                    "input_video": item.inputVideo,
-                    "output_video": item.outVideo,
-                    "track_stats": json.loads(item.trackStats) if item.trackStats and item.trackStats != "{}" else {},
-                    "created_at": item.startTime
-                })
-
-        if detection_type is None or detection_type == "camera":
-            query = select(CameraRecord).where(CameraRecord.username == username)
-            if start_date:
-                query = query.where(CameraRecord.startTime >= start_date)
-            if end_date:
-                query = query.where(CameraRecord.startTime <= end_date)
-
-            result = db.execute(query)
-            for item in result.scalars().all():
-                records.append({
-                    "id": item.id,
-                    "type": "camera",
                     "model_key": item.modelKey,
                     "input_video": item.inputVideo,
                     "output_video": item.outVideo,

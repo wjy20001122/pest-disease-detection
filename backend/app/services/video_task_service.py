@@ -69,13 +69,15 @@ def get_owned_video_task(db: Session, session_id: str, username: str) -> VideoTa
 def to_status_payload(task: VideoTask) -> dict[str, Any]:
     total_counts = _safe_json_loads(task.total_counts_json, {})
     detections = _safe_json_loads(task.detections_json, [])
+    normalized_counts = total_counts if isinstance(total_counts, dict) else {}
     return {
         "session_id": task.session_id,
         "is_processing": task.status in {"queued", "processing"},
         "status": task.status,
         "progress": float(task.progress or 0.0),
         "frame_count": int(task.frame_count or 0),
-        "total_counts": total_counts if isinstance(total_counts, dict) else {},
+        "total_counts": normalized_counts,
+        "unique_track_counts": normalized_counts,
         "total_tracks": int(task.total_tracks or 0),
         "detections": detections if isinstance(detections, list) else [],
         "output_url": task.output_url,

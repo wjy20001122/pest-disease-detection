@@ -16,7 +16,6 @@ OSS_DOMAIN = os.environ.get('OSS_DOMAIN', '').strip()
 OSS_BASE_PATH = 'corn-disease-detection'
 OSS_IMG_PATH = f'{OSS_BASE_PATH}/images'
 OSS_VIDEO_PATH = f'{OSS_BASE_PATH}/videos'
-OSS_CAMERA_PATH = f'{OSS_BASE_PATH}/camera'
 OSS_AVATAR = f'{OSS_BASE_PATH}/avatars'
 
 # 启用OSS存储（所有文件只存储到OSS）

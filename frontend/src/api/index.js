@@ -40,7 +40,7 @@ request.interceptors.response.use(
           ElMessage.error(data.detail || '请求失败')
       }
     } else {
-      ElMessage.error('网络错误')
+      ElMessage.error('网络错误：后端服务不可达，请检查 8000 端口服务')
     }
     return Promise.reject(error)
   }
@@ -73,17 +73,23 @@ export const detectionApi = {
     params,
     headers: { 'Content-Type': 'multipart/form-data' }
   }),
-  video: (formData) => request.post('/detection/video', formData, {
+  video: (formData, params = {}) => request.post('/detection/video', formData, {
+    params,
     headers: { 'Content-Type': 'multipart/form-data' }
   }),
   videoStatus: (sessionId) => request.get(`/detection/video/${sessionId}/status`),
   videoStream: (sessionId) => `${request.defaults.baseURL}/detection/video/${sessionId}/stream`,
+  videoPreview: (sessionId, ts = Date.now()) => {
+    const token = localStorage.getItem('access_token') || ''
+    const query = new URLSearchParams({ ts: String(ts) })
+    if (token) query.set('token', token)
+    return `${request.defaults.baseURL}/detection/video/${sessionId}/preview?${query.toString()}`
+  },
   stopVideo: (sessionId) => request.post(`/detection/video/${sessionId}/stop`),
-  cameraStart: (modelKey) => request.post('/detection/camera/start', null, { params: { model_key: modelKey } }),
-  cameraStream: () => `${request.defaults.baseURL}/detection/camera/stream`,
-  cameraStop: () => request.post('/detection/camera/stop'),
   history: (params) => request.get('/detection/history', { params }),
   clearHistory: () => request.delete('/detection/history'),
+  deleteHistoryRecord: (recordId, detectionType) =>
+    request.delete(`/detection/history/${recordId}`, { params: { detection_type: detectionType } }),
   detail: (id, detectionType) => request.get(`/detection/${id}`, { params: { detection_type: detectionType } }),
   stats: (params) => request.get('/detection/stats/overview', { params }),
   statsOverview: (params) => request.get('/detection/stats/overview', { params })
@@ -96,8 +102,6 @@ export const mlApi = {
   predictImage: (payload) => request.post('/predictImg', payload),
   predictVideo: (params) => request.get('/predictVideo', { params }),
   stopVideo: (sessionId) => request.get('/stopVideo', { params: { sessionId } }),
-  predictCamera: (params) => request.get('/predictCamera', { params }),
-  stopCamera: () => request.get('/stopCamera'),
   startRecording: () => request.get('/startRecording'),
   stopRecording: (params) => request.get('/stopRecording', { params }),
   uploadFile: (file, category) => {
@@ -108,15 +112,6 @@ export const mlApi = {
       headers: { 'Content-Type': 'multipart/form-data' }
     })
   }
-}
-
-// 跟踪任务 API
-export const trackingApi = {
-  create: (data) => request.post('/tracking', data),
-  list: (params) => request.get('/tracking', { params }),
-  detail: (id) => request.get(`/tracking/${id}`),
-  update: (id, data) => request.put(`/tracking/${id}`, data),
-  addUpdate: (id, data) => request.post(`/tracking/${id}/updates`, data)
 }
 
 // 环境数据 API
@@ -156,6 +151,7 @@ export const adminApi = {
   users: (params) => request.get('/admin/users', { params }),
   updateUser: (id, data) => request.patch(`/admin/users/${id}`, data),
   stats: (params) => request.get('/admin/stats', { params }),
+  globalStats: (params) => request.get('/admin/stats', { params }),
   models: () => request.get('/admin/models'),
   updateModel: (modelKey, data) => request.put(`/admin/models/${modelKey}`, data),
   notifications: (params) => request.get('/admin/notifications', { params }),
@@ -172,6 +168,5 @@ export const adminApi = {
 export const recordsApi = {
   getImgRecords: (params) => request.get('/records/img', { params }),
   getVideoRecords: (params) => request.get('/records/video', { params }),
-  getCameraRecords: (params) => request.get('/records/camera', { params }),
   getDataCollectionRecords: (params) => request.get('/records/datacollection', { params })
 }

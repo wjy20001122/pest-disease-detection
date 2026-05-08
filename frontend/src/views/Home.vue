@@ -1,48 +1,6 @@
 <template>
   <div class="home-page">
-    <div class="weather-panel">
-      <div class="weather-head">
-        <div class="weather-item">
-          <span class="label">当前位置</span>
-          <strong>{{ environment.county || environment.address || '未获取' }}</strong>
-        </div>
-        <div class="weather-item">
-          <span class="label">当前天气</span>
-          <strong>{{ environment.weather || '未获取' }}</strong>
-        </div>
-        <div class="weather-item">
-          <span class="label">温度 / 湿度</span>
-          <strong>{{ formatClimate(environment.temperature, environment.humidity) }}</strong>
-        </div>
-      </div>
-      <div class="forecast-block">
-        <div class="forecast-title">
-          <span>{{ environment.county || environment.address || '当前位置' }}</span>
-          <small v-if="forecastError">{{ forecastError }}</small>
-        </div>
-
-        <div class="forecast-main" v-if="weeklyForecast.length">
-          <div class="now-panel">
-            <div class="now-temp">{{ environment.temperature ?? '--' }}<em>°C</em></div>
-            <div class="now-text">
-              <strong>{{ environment.weather || weeklyForecast[0]?.weatherText || '天气' }}</strong>
-              <span>{{ formatTempPair(weeklyForecast[0]?.tempMax, weeklyForecast[0]?.tempMin) }}</span>
-            </div>
-          </div>
-
-          <div class="forecast-grid">
-            <div class="forecast-card" v-for="(item, idx) in weeklyForecast" :key="`${item.date}-${idx}`">
-              <span class="day">{{ item.dayLabel }}</span>
-              <span class="weather">{{ item.weatherText }}</span>
-              <span class="temp">{{ formatTempPair(item.tempMax, item.tempMin) }}</span>
-            </div>
-          </div>
-        </div>
-        <div class="forecast-empty" v-else>
-          {{ forecastLoading ? '正在获取未来7天天气...' : '暂无未来7天天气数据' }}
-        </div>
-      </div>
-    </div>
+    <WeatherTrendPanel />
 
     <div class="metric-grid">
       <MetricCard
@@ -107,11 +65,12 @@
 <script setup>
 import { computed, onMounted, ref } from 'vue'
 import { useUserStore } from '@/stores/user'
-import { adminApi, detectionApi, environmentApi, trackingApi } from '@/api'
+import { adminApi, detectionApi } from '@/api'
 import MetricCard from '@/components/ui/MetricCard.vue'
 import DataPanel from '@/components/ui/DataPanel.vue'
 import EmptyState from '@/components/ui/EmptyState.vue'
 import StatusBadge from '@/components/ui/StatusBadge.vue'
+import WeatherTrendPanel from '@/components/ui/WeatherTrendPanel.vue'
 import {
   Aim,
   Bell,
@@ -127,40 +86,8 @@ const userStore = useUserStore()
 
 const stats = ref({})
 const recentDetections = ref([])
-const trackingCount = ref(0)
 const adminStats = ref({})
-const environment = ref({
-  address: '',
-  county: '',
-  weather: '',
-  temperature: null,
-  humidity: null
-})
-const weeklyForecast = ref([])
-const forecastLoading = ref(false)
-const forecastError = ref('')
-const typeMap = { image: '图像', video: '视频', camera: '摄像头' }
-const weatherCodeMap = {
-  0: '晴',
-  1: '晴间多云',
-  2: '多云',
-  3: '阴',
-  45: '雾',
-  48: '强雾',
-  51: '小毛雨',
-  53: '毛雨',
-  55: '大毛雨',
-  61: '小雨',
-  63: '中雨',
-  65: '大雨',
-  71: '小雪',
-  73: '中雪',
-  75: '大雪',
-  80: '阵雨',
-  81: '强阵雨',
-  82: '暴雨',
-  95: '雷暴'
-}
+const typeMap = { image: '图像', video: '视频' }
 
 const diseaseItems = computed(() => stats.value.disease_distribution?.slice(0, 8) || [])
 
@@ -176,7 +103,6 @@ const metrics = computed(() => {
   return [
     { label: '今日检测', value: stats.value.today_count || 0, hint: '最近24小时任务', icon: Aim },
     { label: '累计检测', value: stats.value.total_count || 0, hint: '历史总量', icon: DataLine },
-    { label: '活跃跟踪', value: trackingCount.value || 0, hint: '正在追踪对象', icon: Location },
     { label: '识别病害类', value: diseaseItems.value.length || 0, hint: '最近分布Top', icon: Reading }
   ]
 })
@@ -196,133 +122,7 @@ const quickLinks = computed(() => {
   ]
 })
 
-function formatClimate(temperature, humidity) {
-  if (temperature === null && humidity === null) return '未获取'
-  const tempText = temperature === null ? '--' : `${temperature}°C`
-  const humText = humidity === null ? '--' : `${humidity}%`
-  return `${tempText} / ${humText}`
-}
-
-function formatTempRange(min, max) {
-  const minText = Number.isFinite(min) ? `${Math.round(min)}°` : '--'
-  const maxText = Number.isFinite(max) ? `${Math.round(max)}°` : '--'
-  return `${minText} ~ ${maxText}`
-}
-
-function formatTempPair(max, min) {
-  const maxText = Number.isFinite(max) ? `${Math.round(max)}°` : '--'
-  const minText = Number.isFinite(min) ? `${Math.round(min)}°` : '--'
-  return `高温 ${maxText} 低温 ${minText}`
-}
-
-function resolveWeatherText(code) {
-  if (code === null || code === undefined || code === '') return '未知'
-  return weatherCodeMap[Number(code)] || '天气'
-}
-
-function formatDayLabel(dateText, index) {
-  if (index === 0) return '今天'
-  if (index === 1) return '明天'
-  const date = new Date(dateText)
-  if (Number.isNaN(date.getTime())) return `第${index + 1}天`
-  return ['周日', '周一', '周二', '周三', '周四', '周五', '周六'][date.getDay()]
-}
-
-async function fetchWeeklyForecast(latitude, longitude) {
-  if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) {
-    weeklyForecast.value = []
-    return
-  }
-  forecastLoading.value = true
-  forecastError.value = ''
-  try {
-    const query = new URLSearchParams({
-      latitude: String(latitude),
-      longitude: String(longitude),
-      timezone: 'auto',
-      forecast_days: '7',
-      daily: 'weather_code,temperature_2m_max,temperature_2m_min'
-    })
-    const response = await fetch(`https://api.open-meteo.com/v1/forecast?${query.toString()}`)
-    if (!response.ok) {
-      throw new Error(`forecast http ${response.status}`)
-    }
-    const data = await response.json()
-    const daily = data?.daily || {}
-    const dates = daily.time || []
-    const weatherCodes = daily.weather_code || []
-    const maxTemps = daily.temperature_2m_max || []
-    const minTemps = daily.temperature_2m_min || []
-
-    weeklyForecast.value = dates.slice(0, 7).map((date, index) => ({
-      date,
-      dayLabel: formatDayLabel(date, index),
-      weatherText: resolveWeatherText(weatherCodes[index]),
-      tempMax: Number(maxTemps[index]),
-      tempMin: Number(minTemps[index])
-    }))
-  } catch (error) {
-    weeklyForecast.value = []
-    forecastError.value = '天气服务暂不可用'
-    console.error('failed to fetch weekly forecast', error)
-  } finally {
-    forecastLoading.value = false
-  }
-}
-
-async function fetchEnvironmentByIp() {
-  try {
-    const res = await environmentApi.ipCurrent()
-    environment.value = {
-      address: res.address || '',
-      county: res.county || res.district || '',
-      weather: res.weather || '',
-      temperature: res.temperature ?? null,
-      humidity: res.humidity ?? null
-    }
-    const lat = Number(res.latitude)
-    const lng = Number(res.longitude)
-    if (Number.isFinite(lat) && Number.isFinite(lng)) {
-      fetchWeeklyForecast(lat, lng)
-    } else {
-      weeklyForecast.value = []
-    }
-  } catch {
-    environment.value = { address: '', county: '', weather: '', temperature: null, humidity: null }
-    weeklyForecast.value = []
-  }
-}
-
-async function fetchEnvironmentByGeo(latitude, longitude) {
-  try {
-    const res = await environmentApi.current({ latitude, longitude })
-    environment.value = {
-      address: res.address || `${latitude.toFixed(5)},${longitude.toFixed(5)}`,
-      county: res.county || res.district || '',
-      weather: res.weather || '',
-      temperature: res.temperature ?? null,
-      humidity: res.humidity ?? null
-    }
-    fetchWeeklyForecast(latitude, longitude)
-  } catch {
-    await fetchEnvironmentByIp()
-  }
-}
-
-function resolveEnvironment() {
-  if (!navigator.geolocation) {
-    fetchEnvironmentByIp()
-    return
-  }
-  navigator.geolocation.getCurrentPosition(
-    ({ coords }) => fetchEnvironmentByGeo(coords.latitude, coords.longitude),
-    () => fetchEnvironmentByIp(),
-    { enableHighAccuracy: true, timeout: 12000, maximumAge: 300000 }
-  )
-}
-
 onMounted(async () => {
-  resolveEnvironment()
   try {
     if (userStore.isAdmin) {
       adminStats.value = await adminApi.dashboard()
@@ -331,12 +131,10 @@ onMounted(async () => {
 
     const [statsRes, historyRes, trackingRes] = await Promise.all([
       detectionApi.stats(),
-      detectionApi.history({ page: 1, page_size: 5 }),
-      trackingApi.list({ status: 'active' })
+      detectionApi.history({ page: 1, page_size: 5 })
     ])
     stats.value = statsRes || {}
     recentDetections.value = historyRes.items || []
-    trackingCount.value = trackingRes.items?.length || 0
   } catch (error) {
     console.error('failed to load home data', error)
   }
@@ -348,152 +146,6 @@ onMounted(async () => {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 12px;
-}
-
-.weather-panel {
-  border: 1px solid var(--border-light);
-  border-radius: var(--radius-md);
-  background: var(--surface-1);
-  padding: 12px;
-}
-
-.weather-head {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 12px;
-  margin-bottom: 12px;
-}
-
-.weather-item {
-  border: 1px solid var(--border-light);
-  background: var(--surface-2);
-  border-radius: var(--radius-md);
-  padding: 14px 16px;
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-
-.weather-item .label {
-  color: var(--text-secondary);
-  font-size: 12px;
-}
-
-.weather-item strong {
-  font-size: 14px;
-  color: var(--text-primary);
-  word-break: break-all;
-}
-
-.forecast-block {
-  border: 1px solid #d8e5f7;
-  border-radius: var(--radius-md);
-  background: #e6f0fd;
-  padding: 12px;
-}
-
-.forecast-title {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 10px;
-  font-size: 14px;
-  color: #203a5f;
-}
-
-.forecast-title small {
-  color: var(--warning);
-}
-
-.forecast-main {
-  display: grid;
-  gap: 10px;
-}
-
-.now-panel {
-  border: 1px solid #cdddf5;
-  border-radius: 8px;
-  background: #d9e9ff;
-  padding: 14px 16px;
-  display: flex;
-  align-items: center;
-  gap: 20px;
-}
-
-.now-temp {
-  font-size: 64px;
-  font-weight: 700;
-  color: #0c2746;
-  line-height: 1;
-  font-variant-numeric: tabular-nums;
-}
-
-.now-temp em {
-  font-style: normal;
-  font-size: 28px;
-  margin-left: 4px;
-}
-
-.now-text {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-
-.now-text strong {
-  font-size: 34px;
-  line-height: 1;
-  color: #1b3658;
-}
-
-.now-text span {
-  font-size: 28px;
-  color: #33587f;
-}
-
-.forecast-grid {
-  display: grid;
-  grid-template-columns: repeat(6, minmax(0, 1fr));
-  gap: 10px;
-}
-
-.forecast-card {
-  border: 1px solid #cfe0f7;
-  border-radius: var(--radius-sm);
-  min-height: 120px;
-  padding: 10px 8px;
-  text-align: center;
-  background: #dcecff;
-  display: flex;
-  flex-direction: column;
-  justify-content: center;
-  gap: 6px;
-}
-
-.forecast-card .day {
-  font-size: 28px;
-  color: #58739b;
-  line-height: 1.2;
-}
-
-.forecast-card .weather {
-  font-size: 24px;
-  font-weight: 600;
-  color: #1f3f65;
-  line-height: 1.2;
-}
-
-.forecast-card .temp {
-  font-size: 20px;
-  color: #2563eb;
-  line-height: 1.2;
-  font-variant-numeric: tabular-nums;
-}
-
-.forecast-empty {
-  font-size: 12px;
-  color: var(--text-muted);
-  padding: 8px 4px;
 }
 
 .quick-actions {
@@ -572,69 +224,16 @@ onMounted(async () => {
 }
 
 @media (max-width: 1279px) {
-  .weather-head,
   .metric-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-  .now-temp {
-    font-size: 48px;
-  }
-  .now-text strong {
-    font-size: 24px;
-  }
-  .now-text span {
-    font-size: 20px;
-  }
-  .forecast-grid {
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-  }
-  .forecast-card .day {
-    font-size: 22px;
-  }
-  .forecast-card .weather {
-    font-size: 18px;
   }
 }
 
 @media (max-width: 767px) {
-  .weather-head,
   .metric-grid,
   .quick-actions,
   .panel-grid {
     grid-template-columns: minmax(0, 1fr);
-  }
-  .now-panel {
-    flex-direction: column;
-    align-items: flex-start;
-    gap: 10px;
-  }
-  .now-temp {
-    font-size: 36px;
-  }
-  .now-temp em {
-    font-size: 20px;
-  }
-  .now-text strong {
-    font-size: 18px;
-  }
-  .now-text span {
-    font-size: 14px;
-  }
-  .forecast-grid {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 8px;
-  }
-  .forecast-card {
-    min-height: 92px;
-  }
-  .forecast-card .day {
-    font-size: 18px;
-  }
-  .forecast-card .weather {
-    font-size: 14px;
-  }
-  .forecast-card .temp {
-    font-size: 13px;
   }
 }
 </style>

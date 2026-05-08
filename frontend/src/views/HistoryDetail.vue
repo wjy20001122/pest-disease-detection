@@ -52,12 +52,13 @@
           <div class="quick-stats">
             <span>总帧数 {{ videoStats.frame_count || 0 }}</span>
             <span>跟踪目标 {{ videoStats.total_tracks || 0 }}</span>
-            <span>检测总数 {{ totalDetectionCount }}</span>
+            <span v-if="hasUniqueTrackCounts">唯一目标数 {{ totalDetectionCount }}</span>
+            <span v-else>命中总数 {{ totalDetectionCount }}</span>
           </div>
           <div v-if="totalCountEntries.length" class="item-grid">
             <div v-for="entry in totalCountEntries" :key="entry.name" class="item-card">
               <div class="name">{{ entry.name }}</div>
-              <div class="meta">累计 {{ entry.count }} 次</div>
+              <div class="meta">{{ hasUniqueTrackCounts ? `累计 ${entry.count} 只` : `累计命中 ${entry.count} 次` }}</div>
             </div>
           </div>
           <div v-else class="placeholder small">未检测到病虫害</div>
@@ -82,10 +83,10 @@ const detail = ref(null)
 const recordId = computed(() => route.params.id)
 const detectionType = computed(() => {
   const type = String(route.query.type || 'image').toLowerCase()
-  return ['image', 'video', 'camera'].includes(type) ? type : 'image'
+  return ['image', 'video'].includes(type) ? type : 'image'
 })
 
-const typeLabel = computed(() => ({ image: '图像', video: '视频', camera: '摄像头' }[detectionType.value]))
+const typeLabel = computed(() => ({ image: '图像', video: '视频' }[detectionType.value]))
 const isImageType = computed(() => detectionType.value === 'image')
 
 const imageItems = computed(() => {
@@ -117,13 +118,16 @@ const videoStats = computed(() => {
   return {
     frame_count: Number(stats?.frame_count || 0),
     total_tracks: Number(stats?.total_tracks || 0),
+    unique_track_counts: stats?.unique_track_counts && typeof stats.unique_track_counts === 'object' ? stats.unique_track_counts : {},
     total_counts: stats?.total_counts && typeof stats.total_counts === 'object' ? stats.total_counts : {}
   }
 })
 
+const hasUniqueTrackCounts = computed(() => Object.keys(videoStats.value.unique_track_counts || {}).length > 0)
+
 const totalCountEntries = computed(() => {
-  const totalCounts = videoStats.value.total_counts || {}
-  return Object.entries(totalCounts)
+  const sourceCounts = hasUniqueTrackCounts.value ? videoStats.value.unique_track_counts : videoStats.value.total_counts
+  return Object.entries(sourceCounts || {})
     .map(([name, count]) => ({ name, count: Number(count) || 0 }))
     .filter((entry) => entry.count > 0)
     .sort((a, b) => b.count - a.count)

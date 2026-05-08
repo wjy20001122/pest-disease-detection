@@ -78,7 +78,7 @@ def process_video_detection(
                     session_id=session_id,
                     progress=float(payload.get("progress", 0.0)),
                     frame_count=int(payload.get("frame_count", 0)),
-                    total_counts=payload.get("total_counts", {}) or {},
+                    total_counts=payload.get("unique_track_counts", payload.get("total_counts", {})) or {},
                     total_tracks=int(payload.get("total_tracks", 0)),
                     detections=payload.get("detections", []) or [],
                 )
@@ -87,7 +87,7 @@ def process_video_detection(
                     local_db,
                     session_id=session_id,
                     frame_count=int(payload.get("frame_count", 0)),
-                    total_counts=payload.get("total_counts", {}) or {},
+                    total_counts=payload.get("unique_track_counts", payload.get("total_counts", {})) or {},
                     total_tracks=int(payload.get("total_tracks", 0)),
                     detections=payload.get("detections", []) or [],
                 )
@@ -97,7 +97,7 @@ def process_video_detection(
                     session_id=session_id,
                     output_url=payload.get("output_url", ""),
                     frame_count=int(payload.get("frame_count", 0)),
-                    total_counts=payload.get("total_counts", {}) or {},
+                    total_counts=payload.get("unique_track_counts", payload.get("total_counts", {})) or {},
                     total_tracks=int(payload.get("total_tracks", 0)),
                     detections=payload.get("detections", []) or [],
                 )
@@ -133,7 +133,7 @@ def process_video_detection(
                 session_id=session_id,
                 output_url=result.get("output_url", ""),
                 frame_count=int(result.get("frame_count", 0)),
-                total_counts=result.get("total_counts", {}) or {},
+                total_counts=result.get("unique_track_counts", result.get("total_counts", {})) or {},
                 total_tracks=int(result.get("total_tracks", 0)),
                 detections=result.get("detections", []) or [],
             )
@@ -142,7 +142,7 @@ def process_video_detection(
                 local_db,
                 session_id=session_id,
                 frame_count=int(result.get("frame_count", 0)),
-                total_counts=result.get("total_counts", {}) or {},
+                total_counts=result.get("unique_track_counts", result.get("total_counts", {})) or {},
                 total_tracks=int(result.get("total_tracks", 0)),
                 detections=result.get("detections", []) or [],
                 output_url=result.get("output_url"),

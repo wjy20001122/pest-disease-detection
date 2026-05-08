@@ -12,11 +12,9 @@ from starlette.background import BackgroundTask
 
 from app.api.deps import get_db
 from app.db.models import (
-    CAMERA_RECORD_FIELDS,
     DATA_COLLECTION_FIELDS,
     IMG_RECORD_FIELDS,
     VIDEO_RECORD_FIELDS,
-    CameraRecord,
     DataCollectionRecord,
     ImgRecord,
     VideoRecord,
@@ -156,128 +154,6 @@ def get_video_records(
     return success(paginate(query, pageNum, pageSize))
 
 
-@router.post("/api/videoRecords/update")
-def update_video_record(payload: JSONDict, db: Session = Depends(get_db)) -> JSONDict:
-    record_id = payload.get("id")
-    if record_id is None:
-        return error("400", "Record id is required")
-    record = db.query(VideoRecord).filter(VideoRecord.id == record_id).first()
-    if record is None:
-        return error("404", "Record not found")
-    apply_generic_payload(record, payload, VIDEO_RECORD_FIELDS)
-    db.commit()
-    db.refresh(record)
-    return success(model_to_dict(record))
-
-
-@router.post("/api/videoRecords")
-def add_video_record(payload: JSONDict, db: Session = Depends(get_db)) -> JSONDict:
-    record = VideoRecord()
-    apply_generic_payload(record, payload, VIDEO_RECORD_FIELDS)
-    db.add(record)
-    db.commit()
-    db.refresh(record)
-    return success(model_to_dict(record))
-
-
-@router.delete("/api/videoRecords/all")
-def delete_all_video_records(db: Session = Depends(get_db)) -> JSONDict:
-    records = db.query(VideoRecord).all()
-    for record in records:
-        delete_oss_values([record.inputVideo, record.outVideo])
-        db.delete(record)
-    db.commit()
-    return success()
-
-
-@router.delete("/api/videoRecords/{record_id}")
-def delete_video_record(record_id: int, db: Session = Depends(get_db)) -> JSONDict:
-    record = db.query(VideoRecord).filter(VideoRecord.id == record_id).first()
-    if record is None:
-        return success()
-    delete_oss_values([record.inputVideo, record.outVideo])
-    db.delete(record)
-    db.commit()
-    return success()
-
-
-@router.get("/api/cameraRecords/all")
-def get_all_camera_records(db: Session = Depends(get_db)) -> JSONDict:
-    records = db.query(CameraRecord).order_by(CameraRecord.id.desc()).all()
-    return success([model_to_dict(record) for record in records])
-
-
-@router.get("/api/cameraRecords/{record_id}")
-def get_camera_record(record_id: int, db: Session = Depends(get_db)) -> JSONDict:
-    record = db.query(CameraRecord).filter(CameraRecord.id == record_id).first()
-    return success(model_to_dict(record) if record else None)
-
-
-@router.get("/api/cameraRecords")
-def get_camera_records(
-    pageNum: int = Query(1),
-    pageSize: int = Query(10),
-    search: str = Query(""),
-    search1: str = Query(""),
-    search2: str = Query(""),
-    search3: str = Query(""),
-    db: Session = Depends(get_db),
-) -> JSONDict:
-    del search2, search3
-    query = db.query(CameraRecord)
-    if search.strip():
-        query = query.filter(CameraRecord.username.like(f"%{search.strip()}%"))
-    if search1.strip():
-        query = query.filter(CameraRecord.modelKey.like(f"%{search1.strip()}%"))
-    query = query.order_by(CameraRecord.startTime.desc())
-    return success(paginate(query, pageNum, pageSize))
-
-
-@router.post("/api/cameraRecords/update")
-def update_camera_record(payload: JSONDict, db: Session = Depends(get_db)) -> JSONDict:
-    record_id = payload.get("id")
-    if record_id is None:
-        return error("400", "Record id is required")
-    record = db.query(CameraRecord).filter(CameraRecord.id == record_id).first()
-    if record is None:
-        return error("404", "Record not found")
-    apply_generic_payload(record, payload, CAMERA_RECORD_FIELDS)
-    db.commit()
-    db.refresh(record)
-    return success(model_to_dict(record))
-
-
-@router.post("/api/cameraRecords")
-def add_camera_record(payload: JSONDict, db: Session = Depends(get_db)) -> JSONDict:
-    record = CameraRecord()
-    apply_generic_payload(record, payload, CAMERA_RECORD_FIELDS)
-    db.add(record)
-    db.commit()
-    db.refresh(record)
-    return success(model_to_dict(record))
-
-
-@router.delete("/api/cameraRecords/all")
-def delete_all_camera_records(db: Session = Depends(get_db)) -> JSONDict:
-    records = db.query(CameraRecord).all()
-    for record in records:
-        delete_oss_values([record.inputVideo, record.outVideo])
-        db.delete(record)
-    db.commit()
-    return success()
-
-
-@router.delete("/api/cameraRecords/{record_id}")
-def delete_camera_record(record_id: int, db: Session = Depends(get_db)) -> JSONDict:
-    record = db.query(CameraRecord).filter(CameraRecord.id == record_id).first()
-    if record is None:
-        return success()
-    delete_oss_values([record.inputVideo, record.outVideo])
-    db.delete(record)
-    db.commit()
-    return success()
-
-
 @router.post("/api/datacollection/save")
 def save_data_collection(payload: JSONDict, db: Session = Depends(get_db)) -> JSONDict:
     record = DataCollectionRecord()
@@ -360,4 +236,3 @@ def download_data_collection(record_id: int, db: Session = Depends(get_db)):
     except Exception as exc:
         cleanup_temp_dir(str(temp_dir))
         return PlainTextResponse(f"Download failed: {exc}", status_code=500)
-

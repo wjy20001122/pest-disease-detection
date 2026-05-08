@@ -1,23 +1,21 @@
-import uuid
 import json
-import asyncio
-import base64
 import logging
 import redis
 from datetime import datetime, timedelta
 from typing import Optional, List, Dict, Any
-from fastapi import APIRouter, Depends, UploadFile, File, Query, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, Depends, UploadFile, File, Query, HTTPException
 from sqlalchemy import and_, delete, desc, func, literal, select, union_all
 from sqlalchemy.orm import Session
 
-from app.db.session import get_db, SessionLocal
-from app.db.models import User, ImgRecord, VideoRecord, CameraRecord, ModelPolicy
+from app.db.session import get_db
+from app.db.models import User, ImgRecord, VideoRecord, ModelPolicy
 from app.api.deps import get_current_user, get_current_user_from_header_or_query, decode_token
 from app.api.routers.notifications import create_notification
 from app.core.config import settings
 from app.services.oss_service import oss_service
 from app.services.detection_router import detection_router, DetectionSource
 from app.services.review_agent import review_agent
+from app.services.prediction_service import prediction_service
 from app.services.video_task_service import (
     create_video_task_record,
     get_owned_video_task,
@@ -29,10 +27,6 @@ from app.services.system_config_service import get_system_config_int
 
 router = APIRouter(prefix="/detection", tags=["检测"])
 logger = logging.getLogger(__name__)
-
-
-camera_ws_sessions: Dict[str, Dict[str, Any]] = {}
-MAX_CAMERA_WS_FRAME_BYTES = 5 * 1024 * 1024
 
 DEFAULT_FALLBACK_NOTICE = "本地模型未识别到有效结果，已回退云端分析，结论未必完全可信。"
 
@@ -318,7 +312,6 @@ async def detect_video(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
-    _ensure_admin_user(current_user)
     _assert_video_queue_ready()
 
     if not file.filename:
@@ -385,7 +378,6 @@ async def get_video_status(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    _ensure_admin_user(current_user)
     task = get_owned_video_task(db, session_id, current_user.username)
     if not task:
         raise HTTPException(status_code=404, detail="会话不存在或已过期")
@@ -409,10 +401,9 @@ async def get_video_status(
 @router.get("/video/{session_id}/stream")
 async def get_video_stream(
     session_id: str,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_user_from_header_or_query),
     db: Session = Depends(get_db),
 ):
-    _ensure_admin_user(current_user)
     from fastapi.responses import RedirectResponse
 
     task = get_owned_video_task(db, session_id, current_user.username)
@@ -429,201 +420,30 @@ async def get_video_stream(
     return RedirectResponse(task.output_url)
 
 
+@router.get("/video/{session_id}/preview")
+async def get_video_preview(
+    session_id: str,
+    current_user: User = Depends(get_current_user_from_header_or_query),
+    db: Session = Depends(get_db),
+):
+    task = get_owned_video_task(db, session_id, current_user.username)
+    if not task:
+        raise HTTPException(status_code=404, detail="会话不存在或已过期")
+    return prediction_service.get_video_preview_frame(session_id)
+
+
 @router.post("/video/{session_id}/stop")
 async def stop_video_detection(
     session_id: str,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    _ensure_admin_user(current_user)
     task = get_owned_video_task(db, session_id, current_user.username)
     if not task:
         raise HTTPException(status_code=404, detail="会话不存在或已过期")
 
     request_stop_video_task(db, session_id)
     return {"status": 200, "message": "Stopping video processing", "code": 0}
-
-
-@router.post("/camera/start")
-async def start_camera_detection(
-    model_key: str = Query("pest"),
-    current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db),
-):
-    _ensure_admin_user(current_user)
-    policy = _resolve_model_policy(db, model_key)
-    effective_model_key = policy["effective_model_key"]
-
-    from app.services.prediction_service import prediction_service
-    session_id = prediction_service.start_camera_session(
-        model_key=effective_model_key,
-        username=current_user.username
-    )
-    return {
-        "session_id": session_id,
-        "status": "started",
-        "selected_model": effective_model_key,
-        "model_switched": policy["model_switched"],
-        "model_message": policy["switch_message"],
-    }
-
-
-@router.get("/camera/stream")
-async def get_camera_stream(
-    current_user: User = Depends(get_current_user_from_header_or_query)
-):
-    _ensure_admin_user(current_user)
-    from fastapi.responses import StreamingResponse
-    from app.services.prediction_service import prediction_service
-    return prediction_service.get_camera_stream()
-
-
-@router.post("/camera/stop")
-async def stop_camera_detection(
-    current_user: User = Depends(get_current_user)
-):
-    _ensure_admin_user(current_user)
-    from app.services.prediction_service import prediction_service
-    result = prediction_service.stop_camera()
-    return result
-
-
-@router.websocket("/camera/ws")
-async def camera_ws_detection(
-    websocket: WebSocket,
-    token: str = Query(""),
-    model_key: str = Query("pest"),
-    frame_interval_ms: int = Query(600, ge=100, le=3000),
-):
-    if not token:
-        await websocket.close(code=1008, reason="Missing token")
-        return
-
-    payload = decode_token(token)
-    if not payload or not payload.get("sub"):
-        await websocket.close(code=1008, reason="Invalid token")
-        return
-
-    user_id = str(payload.get("sub"))
-    db = SessionLocal()
-    try:
-        user = db.execute(select(User).where(User.id == int(user_id))).scalar_one_or_none()
-    finally:
-        db.close()
-
-    if not user or user.role != "admin":
-        await websocket.close(code=1008, reason="Admin required")
-        return
-
-    session_id = str(uuid.uuid4())
-
-    await websocket.accept()
-    camera_ws_sessions[session_id] = {
-        "user_id": user_id,
-        "model_key": model_key,
-        "frame_count": 0,
-        "processed_count": 0,
-        "started_at": datetime.now().isoformat(),
-        "last_result": None,
-        "last_frame_ts": 0.0,
-    }
-
-    await websocket.send_json(
-        {
-            "type": "session_started",
-            "session_id": session_id,
-            "frame_interval_ms": frame_interval_ms,
-        }
-    )
-
-    try:
-        while True:
-            message = await websocket.receive_json()
-            msg_type = message.get("type")
-
-            if msg_type == "stop":
-                await websocket.send_json({"type": "session_stopped", "session_id": session_id})
-                break
-
-            if msg_type != "frame":
-                await websocket.send_json({"type": "error", "message": "Unsupported message type"})
-                continue
-
-            image_data = message.get("image")
-            if not image_data or not isinstance(image_data, str):
-                await websocket.send_json({"type": "error", "message": "Missing frame image"})
-                continue
-
-            camera_ws_sessions[session_id]["frame_count"] += 1
-
-            now_ts = datetime.now().timestamp()
-            min_interval_s = frame_interval_ms / 1000.0
-            last_ts = camera_ws_sessions[session_id].get("last_frame_ts", 0.0)
-            if now_ts - last_ts < min_interval_s:
-                await websocket.send_json(
-                    {
-                        "type": "frame_skipped",
-                        "reason": "rate_limited",
-                        "min_interval_ms": frame_interval_ms,
-                    }
-                )
-                continue
-
-            if "," not in image_data:
-                await websocket.send_json({"type": "error", "message": "Invalid frame format"})
-                continue
-
-            _, b64_data = image_data.split(",", 1)
-
-            try:
-                frame_bytes = base64.b64decode(b64_data)
-            except Exception:
-                await websocket.send_json({"type": "error", "message": "Invalid base64 frame"})
-                continue
-
-            if len(frame_bytes) > MAX_CAMERA_WS_FRAME_BYTES:
-                await websocket.send_json(
-                    {
-                        "type": "error",
-                        "message": "Frame too large",
-                    }
-                )
-                continue
-
-            frame_name = f"camera_ws_{session_id}_{camera_ws_sessions[session_id]['frame_count']}.jpg"
-            try:
-                frame_url = oss_service.upload_bytes_for_category(frame_bytes, frame_name, "camera")
-            except Exception:
-                await websocket.send_json({"type": "error", "message": "OSS上传失败，请检查OSS配置"})
-                continue
-            if not frame_url:
-                await websocket.send_json({"type": "error", "message": "OSS上传失败，请检查OSS配置"})
-                continue
-
-            route_result = await detection_router.route_detection(frame_url)
-
-            camera_ws_sessions[session_id]["processed_count"] += 1
-            camera_ws_sessions[session_id]["last_result"] = route_result
-            camera_ws_sessions[session_id]["last_frame_ts"] = now_ts
-
-            await websocket.send_json(
-                {
-                    "type": "detection_result",
-                    "session_id": session_id,
-                    "frame_url": frame_url,
-                    "source": route_result.get("source"),
-                    "has_pest": route_result.get("has_pest"),
-                    "confirmed_no_pest": route_result.get("confirmed_no_pest", False),
-                    "merged_result": route_result.get("merged_result"),
-                    "ai_analysis": route_result.get("ai_analysis"),
-                    "knowledge_match": route_result.get("knowledge_match"),
-                    "local_detection": route_result.get("local_detection"),
-                }
-            )
-    except WebSocketDisconnect:
-        pass
-    finally:
-        camera_ws_sessions.pop(session_id, None)
 
 
 @router.get("/history")
@@ -662,12 +482,6 @@ async def get_history(
         filters = [VideoRecord.username == current_user.username, *_build_time_filters(VideoRecord.startTime)]
         if keyword:
             filters.append(VideoRecord.modelKey.like(f"%{keyword}%"))
-        return filters
-
-    def _build_camera_filters():
-        filters = [CameraRecord.username == current_user.username, *_build_time_filters(CameraRecord.startTime)]
-        if keyword:
-            filters.append(CameraRecord.modelKey.like(f"%{keyword}%"))
         return filters
 
     if normalized_type == "image":
@@ -716,28 +530,6 @@ async def get_history(
             }
             for item in items
         ]
-    elif normalized_type == "camera":
-        result = db.execute(
-            select(CameraRecord)
-            .where(*_build_camera_filters())
-            .order_by(desc(CameraRecord.id))
-            .offset(offset)
-            .limit(page_size)
-        )
-        items = result.scalars().all()
-        total = db.scalar(select(func.count()).select_from(CameraRecord).where(*_build_camera_filters())) or 0
-        records = [
-            {
-                "id": item.id,
-                "type": "camera",
-                "detection_type": "camera",
-                "input": item.inputVideo,
-                "output": item.outVideo,
-                "track_stats": item.trackStats,
-                "created_at": item.startTime
-            }
-            for item in items
-        ]
     else:
         img_query = select(
             ImgRecord.id.label("id"),
@@ -761,19 +553,7 @@ async def get_history(
             VideoRecord.trackStats.label("track_stats"),
             VideoRecord.startTime.label("created_at"),
         ).where(and_(*_build_video_filters()))
-        camera_query = select(
-            CameraRecord.id.label("id"),
-            literal("camera").label("detection_type"),
-            CameraRecord.inputVideo.label("input"),
-            CameraRecord.outVideo.label("output"),
-            literal(None).label("label"),
-            literal(None).label("confidence"),
-            literal(None).label("crop_type"),
-            CameraRecord.trackStats.label("track_stats"),
-            CameraRecord.startTime.label("created_at"),
-        ).where(and_(*_build_camera_filters()))
-
-        union_subquery = union_all(img_query, video_query, camera_query).subquery()
+        union_subquery = union_all(img_query, video_query).subquery()
         total = db.scalar(select(func.count()).select_from(union_subquery)) or 0
         rows = db.execute(
             select(union_subquery)
@@ -816,18 +596,51 @@ async def clear_history(
     video_deleted = db.execute(
         delete(VideoRecord).where(VideoRecord.username == current_user.username)
     ).rowcount or 0
-    camera_deleted = db.execute(
-        delete(CameraRecord).where(CameraRecord.username == current_user.username)
-    ).rowcount or 0
     db.commit()
     return {
         "deleted": {
             "image": img_deleted,
             "video": video_deleted,
-            "camera": camera_deleted,
-            "total": img_deleted + video_deleted + camera_deleted,
+            "total": img_deleted + video_deleted,
         }
     }
+
+
+@router.delete("/history/{record_id}")
+async def delete_history_record(
+    record_id: int,
+    detection_type: str = Query(...),
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    detection_type = (detection_type or "").strip().lower()
+    if detection_type == "image":
+        record = db.execute(
+            select(ImgRecord).where(
+                ImgRecord.id == record_id,
+                ImgRecord.username == current_user.username,
+            )
+        ).scalar_one_or_none()
+        if not record:
+            raise HTTPException(status_code=404, detail="记录不存在")
+        db.delete(record)
+        db.commit()
+        return {"deleted": {"image": 1, "video": 0, "total": 1}}
+
+    if detection_type == "video":
+        record = db.execute(
+            select(VideoRecord).where(
+                VideoRecord.id == record_id,
+                VideoRecord.username == current_user.username,
+            )
+        ).scalar_one_or_none()
+        if not record:
+            raise HTTPException(status_code=404, detail="记录不存在")
+        db.delete(record)
+        db.commit()
+        return {"deleted": {"image": 0, "video": 1, "total": 1}}
+
+    raise HTTPException(status_code=400, detail="无效的检测类型")
 
 
 def _parse_stats_window(period: str, start_date: str | None, end_date: str | None) -> tuple[datetime, datetime]:
@@ -877,11 +690,8 @@ def _build_detection_stats(
     start, end = _parse_stats_window(period, start_date, end_date)
     img_result = db.execute(select(ImgRecord).where(ImgRecord.username == current_user.username))
     video_result = db.execute(select(VideoRecord).where(VideoRecord.username == current_user.username))
-    camera_result = db.execute(select(CameraRecord).where(CameraRecord.username == current_user.username))
-
     img_records = img_result.scalars().all()
     video_records = video_result.scalars().all()
-    camera_records = camera_result.scalars().all()
 
     pest_distribution = {}
     daily_stats = {}
@@ -911,7 +721,7 @@ def _build_detection_stats(
         except (json.JSONDecodeError, ValueError, TypeError):
             continue
 
-    for record in [*video_records, *camera_records]:
+    for record in video_records:
         if not _record_in_window(record.startTime, start, end):
             continue
         date_key = record.startTime[:10] if record.startTime else "unknown"
@@ -994,24 +804,6 @@ async def get_detail(
             "track_stats": item.trackStats,
             "created_at": item.startTime
         }
-    elif detection_type == "camera":
-        result = db.execute(
-            select(CameraRecord).where(
-                CameraRecord.id == record_id,
-                CameraRecord.username == current_user.username
-            )
-        )
-        item = result.scalar_one_or_none()
-        if not item:
-            raise HTTPException(status_code=404, detail="记录不存在")
-        return {
-            "id": item.id,
-            "type": "camera",
-            "input": item.inputVideo,
-            "output": item.outVideo,
-            "track_stats": item.trackStats,
-            "created_at": item.startTime
-        }
     else:
         raise HTTPException(status_code=400, detail="无效的检测类型")
 
@@ -1019,7 +811,7 @@ async def get_detail(
 @router.get("/export")
 async def export_records(
     format: str = Query("json", description="导出格式：json 或 csv"),
-    detection_type: str = Query(None, description="检测类型：image, video, camera"),
+    detection_type: str = Query(None, description="检测类型：image, video"),
     start_date: str = Query(None, description="开始日期 YYYY-MM-DD"),
     end_date: str = Query(None, description="结束日期 YYYY-MM-DD"),
     current_user: User = Depends(get_current_user),

@@ -1,11 +1,12 @@
 # Pest Disease Detection（病虫害检测系统）
 
-更新时间：2026-05-03
+更新时间：2026-05-08
 
-一个基于 `FastAPI + Vue3 + Element Plus + Celery/Redis` 的农业病虫害检测平台，支持普通用户与管理员分级能力：
+一个基于 `FastAPI + Vue3 + Element Plus + Celery/Redis` 的农业病虫害检测平台，并额外提供独立 `ESP/` 本地边缘实时检测项目：
 
 - 普通用户：图像检测（AI 约束分析）
-- 管理员：图像/视频/摄像头检测（本地模型直连 + 异步任务）
+- 管理员：图像/视频检测（本地模型直连 + 异步任务）
+- ESP32-CAM：独立本地 UDP 实时检测，不上传云服务
 
 ---
 
@@ -13,6 +14,7 @@
 
 - `backend/`：FastAPI 主服务、数据库模型、业务服务、Celery 任务
 - `frontend/`：Vue3 + Vite 前端工作台
+- `ESP/`：ESP32-CAM UDP 固件、小主机 FastAPI 实时检测服务、PySide6 Qt 界面
 - `deploy/`：宝塔部署脚本、PM2 与 Nginx 配置
 - `backend/scripts/`：回归脚本、发布前检查、数据导入脚本
 
@@ -20,7 +22,8 @@
 
 ## 核心功能
 
-- 检测中心：图像/视频/摄像头（按角色展示）
+- 检测中心：图像/视频（按角色展示）
+- ESP 本地实时检测：ESP32-CAM 通过 UDP 传输 JPEG 分包，小主机本地 ONNX 推理，Qt 实时显示
 - 视频异步：Celery + Redis + `video_tasks` 状态持久化
 - 知识库：MySQL 持久化，支持检索、筛选、详情、来源元数据
 - 智能问答：会话持久化，失败明确错误态，支持作物/类别约束
@@ -63,6 +66,25 @@ cd frontend
 npm install
 npm run dev -- --host 0.0.0.0 --port 3000
 ```
+
+### 4) 启动 ESP 本地实时检测（8010 + UDP 9000）
+
+```bash
+cd ESP
+conda activate pest_detect
+pip install -r requirements.txt
+python3 -m uvicorn server.main:app --host 0.0.0.0 --port 8010
+```
+
+Qt 界面：
+
+```bash
+cd ESP
+conda activate pest_detect
+python3 -m qt_client.main
+```
+
+完整小主机部署见 `ESP/DEPLOY.md`。
 
 ---
 
