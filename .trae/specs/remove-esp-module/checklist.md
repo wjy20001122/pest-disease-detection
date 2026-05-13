@@ -1,0 +1,7 @@
+- [x] `ESP/` 目录已从仓库中删除，且不再有任何文件残留
+- [x] 后端不再暴露 `/startRecording` 与 `/stopRecording` 路由
+- [x] 前端不再导出 `mlApi.startRecording` 与 `mlApi.stopRecording`
+- [x] `README.md`、`AGENTS.md`、`deploy/bt/README.md`、`backend/scripts/README.md` 与根目录任务/流程文档已移除所有 ESP 相关说明
+- [x] 全仓检索 `ESP/`、`ESP32`、`esp32`、`8010`、`9000` 无与 ESP 模块相关的残留引用
+- [x] `./scripts/dev_start.sh` 可启动核心开发链路（前端/后端/Redis/Celery）且无 ESP 相关报错
+- [x] 后端测试 `python3 -m pytest --tb=short` 通过

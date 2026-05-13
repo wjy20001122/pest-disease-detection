@@ -7,8 +7,8 @@
 
     <div class="detect-content" v-if="tab === 'image' && !imageResult">
       <div class="upload-section">
+        <input ref="fileInput" type="file" accept="image/jpeg,image/png,image/webp" @change="handleFileChange" hidden />
         <div v-if="!file" class="upload-area" @click="triggerUpload" @dragover.prevent @drop.prevent="handleDrop">
-          <input ref="fileInput" type="file" accept="image/jpeg,image/png,image/webp" @change="handleFileChange" hidden />
           <div class="upload-icon">🖼️</div>
           <div class="upload-text">
             <p>点击或拖拽上传图片</p>
@@ -87,8 +87,8 @@
 
     <div class="detect-content" v-if="tab === 'video' && !videoResult && !videoProcessing">
       <div class="upload-section">
+        <input ref="videoFileInput" type="file" accept="video/mp4,video/avi,video/quicktime" @change="handleVideoChange" hidden />
         <div v-if="!videoFile" class="upload-area" @click="triggerVideoUpload" @dragover.prevent @drop.prevent="handleVideoDrop">
-          <input ref="videoFileInput" type="file" accept="video/mp4,video/avi,video/quicktime" @change="handleVideoChange" hidden />
           <div class="upload-icon">🎥</div>
           <div class="upload-text">
             <p>点击或拖拽上传视频</p>
@@ -342,12 +342,17 @@ function switchTab(next) {
 }
 
 function triggerUpload() {
+  if (fileInput.value) {
+    fileInput.value.value = ''
+  }
   fileInput.value?.click()
 }
 
 function handleFileChange(e) {
   const selected = e.target.files?.[0]
-  if (selected) file.value = selected
+  if (selected && selected.type.startsWith('image/')) {
+    file.value = selected
+  }
 }
 
 function handleDrop(e) {

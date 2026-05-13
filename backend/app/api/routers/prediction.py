@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, File, Query, UploadFile
-from fastapi.responses import JSONResponse
 
 from app.services.prediction_service import prediction_service
 from app.utils.common import JSONDict
@@ -58,37 +57,6 @@ def predict_video(
 @router.get("/api/flask/stopVideo")
 def stop_video(sessionId: str | None = Query(None)) -> JSONDict:
     return prediction_service.stop_video(sessionId or "")
-
-
-@router.get("/startRecording")
-@router.get("/api/flask/startRecording")
-def start_recording() -> JSONDict:
-    return JSONResponse(
-        status_code=410,
-        content={
-            "status": 410,
-            "message": "Camera recording moved to the standalone ESP local service under ESP/.",
-            "code": 410,
-        },
-    )
-
-
-@router.get("/stopRecording")
-@router.get("/api/flask/stopRecording")
-def stop_recording(
-    username: str = Query(""),
-    modelKey: str = Query(""),
-    startTime: str = Query(""),
-) -> JSONDict:
-    del username, modelKey, startTime
-    return JSONResponse(
-        status_code=410,
-        content={
-            "status": 410,
-            "message": "Camera recording moved to the standalone ESP local service under ESP/.",
-            "code": 410,
-        },
-    )
 
 
 @router.post("/upload")

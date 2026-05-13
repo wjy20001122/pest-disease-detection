@@ -102,8 +102,6 @@ export const mlApi = {
   predictImage: (payload) => request.post('/predictImg', payload),
   predictVideo: (params) => request.get('/predictVideo', { params }),
   stopVideo: (sessionId) => request.get('/stopVideo', { params: { sessionId } }),
-  startRecording: () => request.get('/startRecording'),
-  stopRecording: (params) => request.get('/stopRecording', { params }),
   uploadFile: (file, category) => {
     const formData = new FormData()
     formData.append('file', file)
